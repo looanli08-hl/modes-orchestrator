@@ -35,15 +35,15 @@
 
 ## Day 5 — 红色验收测试
 
-- [ ] 把 Orca 的 orchestration 契约测试（`orchestration-guide-command-contract.test.mjs` 等）移植/改造为本仓库 `packages/orchestrator/` 的验收测试（宪法第 2 条）
-- [ ] 此时没有任何实现，**全部测试必须是红色**——红得具体、红得可读，这就是后面实现的验收标准
-- [ ] 测试纳入 `bun run test` 可运行
+- [x] 把 Orca 的 orchestration 契约测试（`orchestration-guide-command-contract.test.mjs` 等）移植/改造为本仓库 `packages/orchestrator/` 的验收测试（宪法第 2 条）——按 port-spec §4 清单落地 8 个 `*.contract.test.ts`
+- [x] 此时没有任何实现，**全部测试必须是红色**——红得具体、红得可读，这就是后面实现的验收标准（8 个文件全部红在"实现模块不存在"的 import 失败上）
+- [x] 测试纳入 `bun run test` 可运行（根 `vitest.config.ts` node project include 加一行 `packages/orchestrator/tests/**/*.test.ts`）
 
 ## 本周里程碑自检（Day 5 结束对照）
 
 - [ ] AGENTS.md 代码库地图已补全
 - [ ] T3 Code / Paseo 复核结论已写入 research.md
 - [ ] 《移植规格书》存在且三张表齐全
-- [ ] 一套红色的契约验收测试在 `bun run test` 里
+- [x] 一套红色的契约验收测试在 `bun run test` 里（8 个 contract 测试文件，全部为"实现缺失"的对的红）
 - [ ] **零行产品实现代码**（多了就是违规）
 - [x] 【已关闭】`docs/vision.md` §7 wedge 定义已于 2026-09-12 拍板：交叉验证打头，额度池化 + 国产混编快速跟进；目标用户 = Orca 群体、重心压国产模型

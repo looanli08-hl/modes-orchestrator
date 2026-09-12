@@ -49,6 +49,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `task_id` | string | 本次 fan-out 的唯一 id |
+| `schema_version` | number | 记录 schema 版本（当前 `1`）；未知版本的记录拒写拒读，不静默吞（对应 port-spec §4 `jsonl-schema-version` 契约） |
 | `lane` | string | fan-out 内的路标识（如 `"A"` / `"B"` / `"review"`）；同一 task_id 下每路一条记录 |
 | `attempt_id` | string | 某一路的一次权威尝试 id；重跑该路产生新 attempt_id，旧 attempt 的结果不得覆盖新结果（对应 Orca 的 stale-dispatch 不变量，见 port-spec §2A） |
 | `task_type` | string | 任务分类（MVP 期允许为 `"unknown"`， schema 必须先占位） |
