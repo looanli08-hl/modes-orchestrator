@@ -11,6 +11,7 @@
 - [x] modes 旧仓资产盘点完成，见 `/Users/looanli/Projects/harness/docs/research/modes-inventory.md`（"抢 5 样"清单 + 46–74h 成本估算已入库，见 `docs/research.md` §6）
 - [x] fork iOfficeAI/AionUi v2.2.2，分支 `modes/main`，跑通构建
 - [x] 创始文档套件入库（本文件 + vision / constitution / research / spec-mvp / AGENTS.md / NOTICE）
+- [x] 构建产物验证：`out/AionUi-2.2.2-mac-arm64.dmg` 产出（ad-hoc 签名），应用启动正常；并在打包产物内跑通真实 CLI agent 会话（Kimi Code CLI / K3，ACP 接管）
 
 ## Day 2 — 代码库地图 + 竞争复核
 
