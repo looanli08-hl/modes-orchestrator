@@ -10,23 +10,34 @@
 
 modes 智能编排器：fork 自 AionUi v2.2.2（Apache-2.0），在其产品壳之上构建**有协议的智能编排**——移植 Orca 的 coordinator-worker 编排协议（任务 DAG + worker 契约），叠加 hermes 记忆思想做路由器长期记忆。差异化只有一条轴：**编排智能**。远程/通知等 AionUi 已有能力不是差异化，不去碰。详见 `docs/vision.md`。
 
-## 代码库地图（AionUi 原始结构，顶层一行说明）
+## 代码库地图（2026-09-12 通读补全）
+
+顶层：
 
 | 路径 | 说明 |
 |---|---|
-| `packages/desktop/` | Electron 桌面端主代码（main/renderer/preload 三进程），上游核心——**只读，勿改** |
-| `packages/web-cli/` | WebUI/headless 模式的 CLI 入口，上游核心——**只读，勿改** |
-| `packages/web-host/` | WebUI 服务器宿主，上游核心——**只读，勿改** |
-| `packages/shared-scripts/` | 跨包共享脚本，上游核心——**只读，勿改** |
-| **`packages/orchestrator/`** | **我们的独立包**：全部编排逻辑（fan-out、worker 契约、交叉评审、JSONL 埋点）只许住在这里，经适配层接触 AionUi 核心 |
-| `examples/` | 上游扩展示例（ext-feishu、ext-wecom-bot、acp-adapter-extension 等），是我们的适配层参考教材 |
-| `docs/` | 上游文档 + 我们的创始文档（vision/constitution/research/spec-mvp/week-1） |
-| `tests/`、`scripts/`、`resources/`、`public/` | 上游测试、构建脚本、应用资源、静态资源 |
-| `mobile/` | 上游移动端伴侣 |
+| `packages/desktop/` | Electron 桌面端主代码（main/renderer/preload 三进程，~143k LOC），上游核心——**只读，勿改** |
+| `packages/web-cli/` | WebUI/headless 模式独立 CLI（bin `aionui-web`，~680 LOC），不依赖 Electron——**只读** |
+| `packages/web-host/` | WebUI 宿主库（~3.9k LOC）：spawn aioncore 后端 + 静态托管 SPA + 反向代理，desktop↔web 共享枢纽——**只读** |
+| `packages/shared-scripts/` | 跨包构建脚本（prepare-aioncore / 打包资源校验）——**只读** |
+| **`packages/orchestrator/`** | **我们的独立包**（尚未创建）：全部编排逻辑（fan-out、worker 契约、交叉评审、JSONL 埋点）只许住在这里，经适配层接触 AionUi 核心 |
+| `examples/` | 上游扩展示例（hello-world 全能力演示、acp-adapter-extension 最小 ACP 贡献、e2e-full-extension 测试夹具、ext-feishu、ext-wecom-bot），是适配层参考教材 |
+| `docs/` | 上游文档 + 我们的创始文档（vision/constitution/research/spec-mvp/week-1/**seams**） |
+| `tests/` | 上游全部测试的家：unit/ 515 个 vitest、e2e/ 121 个 Playwright spec、fixtures/（fake-acp-cli 等） |
+| `scripts/` | 35 个构建/发布/冒烟脚本 |
+| `mobile/` | Expo/React Native 移动伴侣，远程连桌面端 WebUI，不内嵌 agent 逻辑 |
 
-> 上游 AionUi 的原始开发约定（代码风格、i18n、测试、提交格式）保留在 `docs/upstream/AGENTS.aionui.md`，在其核心目录**只读**的前提下仍适用于我们新增代码的风格对齐。
->
-> TODO(Day 2)：让 AI 通读 fork 后把每个顶层目录的一行说明补全细化（见 `docs/week-1.md`）。
+`packages/desktop/src/` 下一级：
+
+| 路径 | 一行说明 |
+|---|---|
+| `src/index.ts` | Electron main 总入口：Sentry → 存储/桥接初始化 → 起 aioncore 后端 → 建主窗口 |
+| `src/common/` | 三进程共享：adapter（IPC↔HTTP 双栈抽象，**ipcBridge.ts 是 2500 行 API 契约目录**）、api（RotatingApiClient 等 LLM 客户端）、chat、config、types |
+| `src/process/` | main 进程业务侧：bridge/（12 个 IPC 桥，renderer→main 唯一入口）、backend/（aioncore spawn）、startup/、services/、pet/（桌宠）、utils/ |
+| `src/preload/` | contextBridge 暴露 `electronAPI.emit`，4 文件 |
+| `src/renderer/` | React SPA（~128k LOC，桌面窗口和 WebUI 复用）：pages/（conversation 最大、settings 15+ 子页、team、cron）、components/、services/、hooks/、api/ |
+
+**架构一句话**：真正的后端是闭源 Rust 二进制 **aioncore**（acp spawn/CLI 探测/登录态接管都在其内部），TS 壳经 HTTP REST + WS(`/ws`) 驱动它；renderer 一切能力经 `common/adapter` 双栈（桌面走 IPC，WebUI 走 HTTP）。编排层对接前必读 `docs/seams.md`。
 
 ## 铁律（详见 `docs/constitution.md`，这三条先记住）
 

@@ -17,14 +17,14 @@
 
 **上午：代码库地图补全（AI 做，人审）**
 
-- [ ] 让 AI 通读 AionUi fork，产出每目录一行说明，回填根目录 `AGENTS.md` 的代码库地图（当前只有顶层，需补 `packages/desktop/src/` 下一级）
-- [ ] 重点标注：ACP 接管链路、RotatingApiClient、team 模式协作代码、扩展示例（examples/）——这些是未来适配层的接缝
+- [x] 让 AI 通读 AionUi fork，产出每目录一行说明，回填根目录 `AGENTS.md` 的代码库地图
+- [x] 重点标注：ACP 接管链路、RotatingApiClient、team 模式协作代码、扩展示例——已产出 `docs/seams.md`
 
 **下午：竞争复核（半天，限时）**
 
-- [ ] 复核 T3 Code（MIT，~19k 星）的编排层：有无 DAG / worker 契约 / 自动聚合评审
-- [ ] 复核 Paseo（AGPL-3.0，~14k 星）的编排层：同上；同时确认 AGPL 对我们的隔离要求
-- [ ] 结论写入 `docs/research.md` §3：空位仍成立 / 空位被占（若被占，回 `docs/vision.md` 复盘差异化）
+- [x] 复核 T3 Code（MIT，~19k 星）的编排层：无 DAG/契约/聚合，结论已写入 research.md §3
+- [x] 复核 Paseo 的编排层：编排靠 SKILL.md 提示词非引擎；许可证已更正为 Apache-2.0
+- [x] 结论写入 `docs/research.md` §3：空位仍成立
 
 ## Day 3–4 — 精读 Orca 编排模块，产出《移植规格书》
 

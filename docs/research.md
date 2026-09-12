@@ -23,10 +23,15 @@
 - 团队模式是 Leader + 成员 slot 群聊模型，协作环境以 MCP 注入——**没有 DAG、没有 worker 契约**，这是我们补的空位。〔对话 [15]，实读 team PRD〕
 - 已占位（不是我们的差异化）：WebUI 远程 / headless 服务器模式、Telegram / 飞书 / 钉钉 / 微信通知、cron 定时任务、20+ CLI agent 与 30+ 模型适配。〔对话 [11][13]〕
 
-## 3. 编排层空位待复核：T3 Code 与 Paseo
+## 3. 编排层空位复核（2026-09-12 已完成，结论：空位成立）
 
-- T3 Code：MIT，约 19k 星；Paseo：AGPL-3.0，约 14k 星。〔来源：modes-inventory 调研上下文 / 对话生态扫描，2026-09〕
-- **第一周必须复核两者的编排层**（见 docs/week-1.md Day 2），确认"有协议的智能编排"空位仍然成立。Paseo 是 AGPL，整合前注意 license 兼容性。
+复核方法：浅克隆两仓读编排层源码（非仅文档）。
+
+**T3 Code**（[pingdotgg/t3code](https://github.com/pingdotgg/t3code)，MIT，~18k 星，最后提交 2026-09-12）：定位是"agent harness 控制面"。其 `apps/server/src/orchestration/` 名为编排引擎，实为 event-sourced 的**会话/线程状态机**（decider/projector/reactor），命令全集是 thread 生命周期，无任务间依赖概念。四问全否：无 DAG、无任务级 worker 契约（只有驱动 CLI 进程的 provider 适配层）、无自动交叉评审（review 全由人做）、用量只是 ccusage 式报表不参与调度。**定性：加强版"人盯着的并行终端"。**
+
+**Paseo**（[getpaseo/paseo](https://github.com/getpaseo/paseo)，~14k 星，最后提交 2026-09-12）：**许可证更正——2026-08 已从 AGPL-3.0 relicense 为 Apache-2.0**（issue #2982，全仓无 AGPL 字样），此前的 AGPL 隔离顾虑失效。有 agent 生命周期协议 + worktree 隔离一等公民（`isolation: "worktree"`），委员会/顾问/handoff 以 SKILL.md 提示词形式存在（`skills/paseo-committee/SKILL.md` 等）——但编排智能寄生在调用 MCP 工具的 LLM 的 prompt 里，无 DAG、结果回收是自然语言文本无结构化 schema、无成本感知路由。**定性：daemon 是并行终端 + 生命周期管理，编排靠提示词不靠引擎。**
+
+**结论**：2026-09 没有人占住"有协议的智能编排"。差异锚点一句话：**我们是唯一把"结构化 worker 契约 + 确定性 fan-out/交叉评审/diff 聚合"做成引擎（代码保证）而非提示词（LLM 自觉）的产品**。T3/Paseo 的活跃度反向证明了"多 CLI agent 并行 + worktree 隔离 + 移动 steering"的市场需求已被验证。
 
 ## 4. 国产模型现状（2026-09）
 
