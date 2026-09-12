@@ -1,0 +1,19 @@
+# NOTICE
+
+> 这份文件是什么：Apache-2.0 许可证要求的归属声明文件。
+> 什么时候该读：再分发、发布安装包、或修改版权声明前。
+> 日期：2026-09-12
+
+---
+
+modes 智能编排器（modes-orchestrator）
+
+本项目 fork 自 **AionUi**（https://github.com/iOfficeAI/AionUi），
+原项目以 **Apache License 2.0** 发布，版权归原著作权人（iOfficeAI 及 AionUi
+贡献者）所有。本仓库保留原项目的 LICENSE 文件及源文件中的版权声明。
+
+本项目中由 modes 项目方新增或修改的部分（包括但不限于 `packages/orchestrator/`
+与 `docs/` 下的创始文档），同样以 Apache License 2.0 发布。
+
+**品牌声明**："modes" 品牌与原 AionUi 项目及其作者无任何关联；原项目不对本
+fork 提供任何背书、支持或担保。本产品的任何陈述与问题均属于 modes 项目方。

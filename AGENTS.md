@@ -1,154 +1,55 @@
-# AionUi - Project Guide
+# AGENTS.md — modes 智能编排器 · AI 助手导航
 
-All contributors (human and AI) must follow [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. ([Chinese version](CONTRIBUTING.zh.md))
+> 这份文件是什么：给 AI 编码助手（和人类新成员）的仓库入口地图。
+> 什么时候该读：每次开工第一件事，先读本文件，再读 `docs/constitution.md`，任务来自 `docs/spec-mvp.md`。
+> 日期：2026-09-12
 
-## Code Conventions
+---
 
-### File & Directory Structure
+## 项目是什么（一段话）
 
-- **Directory size limit**: Prefer ≤ **10** direct children per directory; new or substantially reorganized directories must satisfy this.
+modes 智能编排器：fork 自 AionUi v2.2.2（Apache-2.0），在其产品壳之上构建**有协议的智能编排**——移植 Orca 的 coordinator-worker 编排协议（任务 DAG + worker 契约），叠加 hermes 记忆思想做路由器长期记忆。差异化只有一条轴：**编排智能**。远程/通知等 AionUi 已有能力不是差异化，不去碰。详见 `docs/vision.md`。
 
-See [docs/contributing/file-structure.md](docs/contributing/file-structure.md) for complete rules. Agents must also follow the `architecture` skill (`.claude/skills/architecture/SKILL.md`) when creating files or modules.
+## 代码库地图（AionUi 原始结构，顶层一行说明）
 
-### Naming
+| 路径 | 说明 |
+|---|---|
+| `packages/desktop/` | Electron 桌面端主代码（main/renderer/preload 三进程），上游核心——**只读，勿改** |
+| `packages/web-cli/` | WebUI/headless 模式的 CLI 入口，上游核心——**只读，勿改** |
+| `packages/web-host/` | WebUI 服务器宿主，上游核心——**只读，勿改** |
+| `packages/shared-scripts/` | 跨包共享脚本，上游核心——**只读，勿改** |
+| **`packages/orchestrator/`** | **我们的独立包**：全部编排逻辑（fan-out、worker 契约、交叉评审、JSONL 埋点）只许住在这里，经适配层接触 AionUi 核心 |
+| `examples/` | 上游扩展示例（ext-feishu、ext-wecom-bot、acp-adapter-extension 等），是我们的适配层参考教材 |
+| `docs/` | 上游文档 + 我们的创始文档（vision/constitution/research/spec-mvp/week-1） |
+| `tests/`、`scripts/`、`resources/`、`public/` | 上游测试、构建脚本、应用资源、静态资源 |
+| `mobile/` | 上游移动端伴侣 |
 
-- **Components**: PascalCase (`Button.tsx`, `Modal.tsx`)
-- **Utilities**: camelCase (`formatDate.ts`)
-- **Hooks**: camelCase with `use` prefix (`useTheme.ts`)
-- **Constants files**: camelCase (`constants.ts`) — values inside use UPPER_SNAKE_CASE
-- **Type files**: camelCase (`types.ts`)
-- **Style files**: kebab-case or `ComponentName.module.css`
-- **Unused params**: prefix with `_`
+> 上游 AionUi 的原始开发约定（代码风格、i18n、测试、提交格式）保留在 `docs/upstream/AGENTS.aionui.md`，在其核心目录**只读**的前提下仍适用于我们新增代码的风格对齐。
+>
+> TODO(Day 2)：让 AI 通读 fork 后把每个顶层目录的一行说明补全细化（见 `docs/week-1.md`）。
 
-### UI Library & Icons
+## 铁律（详见 `docs/constitution.md`，这三条先记住）
 
-- **Components**: `@arco-design/web-react` — no raw interactive HTML (`<button>`, `<input>`, `<select>`, etc.)
-- **Icons**: `@icon-park/react`
+1. **不动 AionUi 核心目录**——编排代码只进 `packages/orchestrator/`，经适配层交互（宪法第 3 条）。
+2. **新代码必须带测试**——无测试不合并；移植协议时先移契约测试再写实现（宪法第 1、2 条）。
+3. **先读 docs 再动手**——`docs/vision.md`（做什么不做什么）→ `docs/constitution.md`（怎么做事）→ `docs/spec-mvp.md`（当前唯一任务）。聊天记录、临时想法不进入开发流程。
 
-### CSS
-
-- Prefer **UnoCSS utility classes**; complex styles use **CSS Modules** (`ComponentName.module.css`)
-- Colors must use **semantic tokens** from `uno.config.ts` or CSS variables — no hardcoded values
-- Arco theme overrides go in `packages/desktop/src/renderer/styles/arco-override.css`; component-scoped Arco overrides use CSS Module with `:global()`
-- Global styles only in `packages/desktop/src/renderer/styles/`
-
-Formatting rules (Oxfmt, Prettier-compatible):
-
-- Single-element arrays that fit on one line → inline: `[{ id: 'a', value: 'b' }]`
-- Trailing commas required in multi-line arrays/objects
-- Single quotes for strings
-
-### TypeScript
-
-- Strict mode enabled — no `any`, no implicit returns
-- Use path aliases: `@/*`, `@process/*`, `@renderer/*`
-- Prefer `type` over `interface` (per Oxlint config)
-- English for code comments; JSDoc for public functions
-
-### Internationalization (i18n)
-
-New or changed user-facing text must use i18n keys; do not introduce hardcoded strings. Languages and modules are defined in `packages/desktop/src/common/config/i18n-config.json`.
-
-See the `i18n` skill (`.claude/skills/i18n/SKILL.md`) for complete workflow, key naming, and validation steps.
-
-## Architecture
-
-Two process types — never mix their APIs:
-
-| Process  | Path                             | Restriction     |
-| -------- | -------------------------------- | --------------- |
-| Main     | `packages/desktop/src/process/`  | No DOM APIs     |
-| Renderer | `packages/desktop/src/renderer/` | No Node.js APIs |
-
-Cross-process communication must go through the IPC bridge (`packages/desktop/src/preload/`).
-See [docs/architecture/overview.md](docs/architecture/overview.md) for details.
-
-## Testing
-
-**Framework**: Vitest 4 (`vitest.config.ts`). Project coverage target is ≥ 80%; ordinary changes should add focused tests for changed behavior.
+## 常用命令
 
 ```bash
-bun run test              # run all tests
-bun run test:coverage     # with coverage report
+bun install        # 安装依赖（上游 lockfile 为 bun.lock，统一用 bun，不要用 npm——npm 不支持 workspace:* 协议）
+bun run dev        # 桌面端开发模式（electron-vite dev）
+bun run test       # 全部测试（vitest run）
+bun run lint       # lint（oxlint）
+bun run package    # 构建桌面安装包（electron-vite build）
 ```
 
-See the `testing` skill (`.claude/skills/testing/SKILL.md`) for complete workflow and quality rules.
+## 上游同步纪律
 
-## Workflow
+- 锁定 AionUi **v2.2.2**，不追 main；
+- 每月看一次上游 changelog，按需 cherry-pick 单个修复；
+- **永不** `git rebase` / `git merge` 上游 main（宪法第 4 条）。
 
-### Scope & Enforcement
+## 合规红线（一句话版）
 
-- **Hard blockers**: process boundary violations, TypeScript errors, failing tests, unsafe IPC usage, missing i18n for new or changed user-facing text, and raw interactive HTML in new UI.
-- **Current-change requirements**: naming, CSS, file placement, tests, docs, directory size, and single-file-directory rules apply to files created or meaningfully modified by the current change.
-- **Ratchet rules**: existing directory size or single-file-directory violations do not require cleanup during ordinary feature work or bugfixes, but the current change must not make them worse.
-- **No scope expansion**: implementation plans and reviews must not create extra tasks, phases, or acceptance criteria for cleanup unless the user asks for that scope.
-- **Ignored working docs**: `docs/superpowers/` is intentionally gitignored for local Superpowers specs and plans. Do not force-add or otherwise commit files from this directory.
-
-### During Development
-
-Auto-fix as you edit:
-
-```bash
-bun run lint:fix       # auto-fix lint issues (oxlint)
-bun run format         # auto-format all files (oxfmt)
-bunx tsc --noEmit      # verify no type errors
-```
-
-If your changes touch `packages/desktop/src/renderer/`, `locales/`, or `packages/desktop/src/common/config/i18n`, also run:
-
-```bash
-bun run i18n:types
-node scripts/check-i18n.js
-```
-
-### Before Pushing
-
-AI agents must not push unless explicitly asked. When pushing, use `just push`, never `git push`:
-
-```bash
-just push                          # lint → format-check → typecheck → test → git push
-just push -u origin feat/branch    # same checks, with extra git push args
-```
-
-Any step that fails aborts the push. Fix the issue, commit, then retry.
-
-> **Note for AI agents**: `just push` uses `--quiet` for lint — only errors cause failure. The project has many pre-existing lint _warnings_ which do NOT indicate failure. Judge success by exit code, not by output volume.
-
-### Before PR (optional stricter check)
-
-`prek` replicates the **exact CI pipeline** (includes end-of-file, trailing whitespace checks on all file types):
-
-```bash
-# One-time setup
-npm install -g @j178/prek
-
-# Run
-prek run --from-ref origin/main --to-ref HEAD
-```
-
-> `prek` is read-only — it reports but does not fix. If it reports issues, run the auto-fix commands above, commit, then re-run.
-
-### Commit & PR Format
-
-Commits and PR titles must follow the Conventional Commit format defined in [CONTRIBUTING.md](CONTRIBUTING.md):
-
-```text
-<type>(<scope>): <subject>
-```
-
-Allowed types: `feat`, `fix`, `perf`, `refactor`, `docs`, `style`, `chore`, `test`, `ci`, `build`.
-
-When opening a PR, fill in the PR body using [.github/pull_request_template.md](.github/pull_request_template.md) and complete its checklists honestly (only check items you actually ran or verified).
-
-**NEVER add AI signatures** (Co-Authored-By, Generated with, etc.).
-
-## Skills Index
-
-| Skill            | Purpose                                                                     | Triggers                                                                                               |
-| ---------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| **architecture** | File & directory structure conventions for all process types                | Creating files, adding modules, architectural decisions                                                |
-| **i18n**         | Internationalization workflow and standards                                 | Adding or changing user-facing text, modifying `locales/` or `packages/desktop/src/common/config/i18n` |
-| **testing**      | Testing workflow and quality standards                                      | Writing tests, changing runtime behavior, fixing bugs, or claiming behavior is verified                |
-| **bump-version** | Version bump workflow: update package.json, checks, branch, PR, tag release | Bumping version, `/bump-version`                                                                       |
-
-> Skills are located in `.claude/skills/` and contain project conventions that apply to **all** agents and contributors.
+只做官方非交互模式 + 跨厂商切换 + BYO 账号；不碰同厂商多账号池、转售、反向代理。详见 `docs/vision.md` §3。
