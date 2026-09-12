@@ -49,13 +49,15 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `task_id` | string | 本次 fan-out 的唯一 id |
+| `lane` | string | fan-out 内的路标识（如 `"A"` / `"B"` / `"review"`）；同一 task_id 下每路一条记录 |
+| `attempt_id` | string | 某一路的一次权威尝试 id；重跑该路产生新 attempt_id，旧 attempt 的结果不得覆盖新结果（对应 Orca 的 stale-dispatch 不变量，见 port-spec §2A） |
 | `task_type` | string | 任务分类（MVP 期允许为 `"unknown"`， schema 必须先占位） |
 | `model` | string | 实际执行的模型标识 |
 | `provider` | string | 端点标识（CLI 名或 API 提供方） |
 | `role` | string | `worker` / `reviewer` |
 | `outcome` | string | `success` / `failed` / `timeout` / `quota_exhausted` |
 | `score` | number \| null | 评审得分（无评审环节则为 null） |
-| `cost` | number | 本次调用成本（免费额度记 0） |
+| `cost` | number \| null | 本次调用成本（免费额度记 0；CLI 未暴露用量时记 null，不伪造） |
 | `latency` | number | 端到端毫秒 |
 | `verifier` | string | 产出该结论的验证方（评审模型 id 或 `"human"`） |
 | `ts` | string | ISO8601 时间戳 |

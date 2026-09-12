@@ -28,7 +28,7 @@
 
 ## Day 3–4 — 精读 Orca 编排模块，产出《移植规格书》
 
-- [ ] 精读 `stablyai/orca` 的 `skills/orchestration/`（7 份协议文档）与 `src/cli/handlers/orchestration/`（30+ 处理器）
+- [x] 精读 Orca 编排模块（实际位置：`skill-guides/orchestration.md` + `references/` 8 份文档、23 个 handler 文件）——已产出 `docs/port-spec.md`
 - [ ] 交叉参考 harness 仓库 `work/moa-recon-2026-08-28.md` 的机制清单（并行扇出 / never-raises 降级 / 全失败跳过合成 / 禁止套娃 / advisory 视图 / guidance 末尾注入 / 按顾问窗口裁剪 / 成本记账）与 hermes `agent/moa_loop.py`（2125 行生产级 MoA）的语义细节
 - [ ] 产出《移植规格书》写入 `docs/porting-spec-orca.md`，必须包含三张表：**协议消息类型**（消息、方向、payload schema）、**状态机**（worker/coordinator 各自的状态与迁移条件）、**存储模型**（持久化什么、什么只放内存）
 - [ ] 规格书里每个设计决策标注"继承自 Orca/hermes 哪一处"——AI 只做映射，不重新设计（宪法第 6 条）
