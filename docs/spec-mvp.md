@@ -55,7 +55,7 @@
 | `task_type` | string | 任务分类（MVP 期允许为 `"unknown"`， schema 必须先占位） |
 | `model` | string | 实际执行的模型标识 |
 | `provider` | string | 端点标识（CLI 名或 API 提供方） |
-| `role` | string | `worker` / `reviewer` |
+| `role` | string | `worker` / `reviewer` / `gate`（gate = 人类 gate 决策记录，对应 port-spec §3：用户选择落 JSONL，`verifier: "human"`；2026-09-13 修订） |
 | `outcome` | string | `success` / `failed` / `timeout` / `quota_exhausted` |
 | `score` | number \| null | 评审得分（无评审环节则为 null） |
 | `cost` | number \| null | 本次调用成本（免费额度记 0；CLI 未暴露用量时记 null，不伪造） |

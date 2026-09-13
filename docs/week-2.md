@@ -48,6 +48,9 @@
 
 ### 下一步
 
-1. A4 手动验收：真实仓库上跑一次有区分度的任务，用户完成"选优合并"
+1. ~~A4 手动验收~~ ✅ 2026-09-13 完成：鹦鹉骑车 SVG 任务，kimi（精致场景）vs qwen/ModelScope（要素齐全但糙），
+   评审 agreed，**用户选 A 合并**，gate 记录 `verifier: "human:A"` 落 JSONL——MVP 全链路（fan-out → 评审 → 人拍板 → 合并）闭环
 2. `runTask` 目前 `model: 'unknown'`——真实模型标识从 CLI 配置透传（kimi: `~/.kimi-code/config.toml` 的 default_model；qwen: `~/.qwen/.env` 的 OPENAI_MODEL）
 3. kimi 报错时 exit 0 的怪癖（`error: Cannot combine...` 也是 exit 0）——解析器后续需要"stdout 以 error: 开头视为 failed"的防御（已观察，未实现）
+4. 【backlog 决策点】评审目前只判对错不判优劣：两路都"对"但质量悬殊时 agreed 无区分度。是否给评审加"推荐哪路"输出，待讨论
+5. 【backlog】`recordUserPick` 已能落账，但 runTask 的 lifecycle 还在内存里——pick 动作目前是脚本手动触发。持久化任务状态（task JSON，port-spec §3 提过）后再串成一条命令

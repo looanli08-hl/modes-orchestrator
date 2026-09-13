@@ -31,7 +31,7 @@ export const EVENT_LOG_FIELDS: readonly EventLogField[] = [
 export const EVENT_LOG_OUTCOME_VALUES = ['success', 'failed', 'timeout', 'quota_exhausted'] as const;
 export type EventLogOutcome = (typeof EVENT_LOG_OUTCOME_VALUES)[number];
 
-export const EVENT_LOG_ROLE_VALUES = ['worker', 'reviewer'] as const;
+export const EVENT_LOG_ROLE_VALUES = ['worker', 'reviewer', 'gate'] as const;
 export type EventLogRole = (typeof EVENT_LOG_ROLE_VALUES)[number];
 
 export interface EventLogRecord {
