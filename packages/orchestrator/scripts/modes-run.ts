@@ -44,6 +44,9 @@ for (const lane of result.lanes) {
 }
 console.log(`\n──── REVIEW ────`);
 console.log(result.review ? `${result.review.verdict}: ${result.review.rationale.slice(0, 600)}` : '(skipped — both lanes failed)');
+if (result.review?.pick) {
+  console.log(`评审推荐: ${result.review.pick === 'tie' ? 'TIE（质量相当）' : `LANE ${result.review.pick}`}`);
+}
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const answer = await new Promise<string>((resolve) => rl.question('\nPick A / B / neither? ', resolve));

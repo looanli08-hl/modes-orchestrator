@@ -52,6 +52,6 @@
    评审 agreed，**用户选 A 合并**，gate 记录 `verifier: "human:A"` 落 JSONL——MVP 全链路（fan-out → 评审 → 人拍板 → 合并）闭环
 2. `runTask` 目前 `model: 'unknown'`——真实模型标识从 CLI 配置透传（kimi: `~/.kimi-code/config.toml` 的 default_model；qwen: `~/.qwen/.env` 的 OPENAI_MODEL）
 3. kimi 报错时 exit 0 的怪癖（`error: Cannot combine...` 也是 exit 0）——解析器后续需要"stdout 以 error: 开头视为 failed"的防御（已观察，未实现）
-4. 【backlog 决策点】评审目前只判对错不判优劣：两路都"对"但质量悬殊时 agreed 无区分度。是否给评审加"推荐哪路"输出，待讨论
+4. ~~【backlog 决策点】评审加推荐路输出~~ ✅ 2026-09-13 完成：评审 prompt 升级为双标记——`VERDICT` 判对错 + `PICK: A/B/TIE` 判优劣；缺 PICK 标记 = null 不伪造（8 新测试）。真实复跑鹦鹉任务：评审给出 "PICK: A" 且理由细化到解剖结构/车架合理性。modes-run 展示"评审推荐"行
 5. ~~【backlog】recordUserPick 手动触发~~ ✅ `scripts/modes-run.ts` 交互命令已串起全流程：fan-out → 展示双路 diff + 评审 → 问 pick → `recordUserPick` + `mergeLane`（含 merge 冲突自动 abort 回滚，2 测试）。验证：piped pick B 端到端跑通，git log 留 merge 痕，JSONL 4 条记录齐（worker×2 / reviewer / gate）
 6. 【backlog】任务状态持久化（task JSON，port-spec §3）——modes-run 单进程内闭环已成立，持久化的价值变成"跨会话恢复/历史列表"，优先级下降
