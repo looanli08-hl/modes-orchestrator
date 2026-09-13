@@ -35,15 +35,37 @@ export function makeRealDeps(repoPath: string, options: RealDepsOptions): FanOut
 
     spawnProcess(cli, args, opts) {
       return new Promise<SpawnedProcessResult>((resolve, reject) => {
-        const child = spawn(cli, args, { cwd: opts.cwd });
+        // detached: the child gets its own process group so the kill timer can
+        // take down the WHOLE group. Launcher CLIs (qwen's bin is a script that
+        // spawns the real CLI as a grandchild) survive a plain child.kill: the
+        // grandchild keeps running and holds the stdio pipes, so 'close' never
+        // fires and the lane hangs forever (observed 2026-09-14, qwen 429 storm).
+        const child = spawn(cli, args, { cwd: opts.cwd, detached: process.platform !== 'win32' });
         let stdout = '';
         let stderr = '';
         let timedOut = false;
 
+        const killGroup = (signal: NodeJS.Signals): void => {
+          // negative pid = the process group (POSIX); Windows has no groups → direct kill
+          if (process.platform !== 'win32' && child.pid !== undefined) {
+            try {
+              process.kill(-child.pid, signal);
+              return;
+            } catch {
+              // group already gone — fall through to the direct kill
+            }
+          }
+          try {
+            child.kill(signal);
+          } catch {
+            // already dead
+          }
+        };
+
         const killTimer = setTimeout(() => {
           timedOut = true;
-          child.kill('SIGTERM');
-          setTimeout(() => child.kill('SIGKILL'), 5000).unref();
+          killGroup('SIGTERM');
+          setTimeout(() => killGroup('SIGKILL'), 5000).unref();
         }, timeoutMs);
 
         child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString('utf8')));
