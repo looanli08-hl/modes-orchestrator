@@ -1,0 +1,6 @@
+{
+  "name": "modes-console-extension",
+  "private": true,
+  "type": "commonjs",
+  "description": "aioncore loads extension scripts with Node require(); this file scopes the extension's .js files to CommonJS inside the otherwise ESM (\"type\": \"module\") orchestrator package. Not an npm package — no dependencies, nothing to install."
+}

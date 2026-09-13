@@ -1,0 +1,60 @@
+{
+  "name": "modes-console",
+  "displayName": "modes console",
+  "version": "0.1.0",
+  "description": "modes orchestrator console embedded in AionUi: thin shell + proxy to the local console server on 127.0.0.1:4177",
+  "author": "modes",
+  "lifecycle": {
+    "onActivate": "scripts/activate.js"
+  },
+  "contributes": {
+    "webui": {
+      "apiRoutes": [
+        {
+          "path": "/modes-console/api/tasks",
+          "method": "GET",
+          "entryPoint": "webui/tasks.js",
+          "description": "List orchestration tasks",
+          "auth": false
+        },
+        {
+          "path": "/modes-console/api/tasks",
+          "method": "POST",
+          "entryPoint": "webui/tasks.js",
+          "description": "Create an orchestration task ({mode, prompt, repoPath?})",
+          "auth": false
+        },
+        {
+          "path": "/modes-console/api/task",
+          "method": "GET",
+          "entryPoint": "webui/task.js",
+          "description": "Task detail (GET ?id=<taskId>)",
+          "auth": false
+        },
+        {
+          "path": "/modes-console/api/pick",
+          "method": "POST",
+          "entryPoint": "webui/pick.js",
+          "description": "Record the human pick for a compete task (POST {id, pick})",
+          "auth": false
+        }
+      ],
+      "staticAssets": [
+        {
+          "urlPrefix": "/modes-console/assets",
+          "directory": "assets",
+          "description": "modes console panel HTML (copied from packages/orchestrator/panel by onActivate)"
+        }
+      ]
+    },
+    "settingsTabs": [
+      {
+        "id": "modes-console",
+        "name": "modes console",
+        "entryPoint": "assets/index.html",
+        "position": { "anchor": "display", "placement": "after" },
+        "order": 90
+      }
+    ]
+  }
+}
