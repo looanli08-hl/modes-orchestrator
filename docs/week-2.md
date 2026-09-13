@@ -148,3 +148,11 @@ bun run dev
 - [x] **评测器第三功（严重）**：qwen 的 bin 是 launcher 脚本，超时 kill 只杀壳不杀孙进程 → stdio 管道被占 → lane 永久挂起（429 风暴中实测复现）。修复：detached 进程组 + 负 pid 组杀（spawn-process-kill.test.ts 锁定）
 - [x] 运维实录：429 风暴期间多个 eval 并发（launchd 04:17 火 + 手动回归 + 被 kill 运行的孤儿 lane），全部按进程族谱厘清；误伤排查确认 tty 上的交互 kimi 会话不动
 - 测试总数 247 全绿
+
+### 429 风暴下的 eval 解读（凌晨 core 跑 3/8，无代码回归）
+
+- 4 个 "expected >= 2 lanes, got 1"：qwen lane 全部 **timeout**（ModelScope 429 风暴把 qwen 拖过超时线），kimi 全 success——环境降级，非回归
+- **cascade-basic "失败"实为首次真实升级证据**：qwen level 1 超时 → 自动升级 kimi level 2 成功——升级路径第一次在非构造环境下走完，期望（永远 level 1 早停）只在配额健康日成立
+- **auto-exec 通过**：路由器真实分类 + cascade 正常终止，auto 模式真实验证完成
+- 真实数据同时确认 model 透传工作（kimi-code/k3、Qwen/Qwen3-Coder-30B-A3B-Instruct 如实落 JSONL）
+- 经验：eval 期望反映"健康配额日"的基线；风暴日的失败本身就是路由数据（什么时候该避开 qwen）
