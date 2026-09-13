@@ -140,15 +140,23 @@
 
 // API base: standalone, the console server serves this file at / and the API
 // at /api/*. Embedded in AionUi as the modes-console extension, an injected
-// window.MODES_API_BASE ("/modes-console/api") points at the extension's
-// proxy routes instead. Extension apiRoutes are exact paths (no path
-// params), so embedded URLs carry the task id as ?id= / a body field.
+// window.MODES_API_BASE points at the console server directly (absolute URL —
+// aioncore 2.2.2 does not mount extension webui apiRoutes, so the panel talks
+// to 127.0.0.1:4177 cross-origin; the console's open CORS + bearer token make
+// that safe). window.MODES_TOKEN carries the shared token; both are injected
+// by whoever serves the HTML (consoleServer GET /, or the extension's
+// activate.js asset sync). Embedded URLs carry the task id as ?id= / a body
+// field only when routed through the extension's (currently unmounted) proxy
+// routes; direct absolute-base mode uses the console's native REST shapes.
 const API_BASE = typeof window.MODES_API_BASE === "string" ? window.MODES_API_BASE : "/api";
-const EMBEDDED = API_BASE !== "/api";
+const TOKEN = typeof window.MODES_TOKEN === "string" ? window.MODES_TOKEN : null;
+const VIA_EXTENSION_PROXY = API_BASE === "/modes-console/api";
 const apiUrl = {
   tasks: () => `${API_BASE}/tasks`,
-  task: (id) => (EMBEDDED ? `${API_BASE}/task?id=${encodeURIComponent(id)}` : `${API_BASE}/tasks/${encodeURIComponent(id)}`),
-  pick: (id) => (EMBEDDED ? `${API_BASE}/pick` : `${API_BASE}/tasks/${encodeURIComponent(id)}/pick`),
+  task: (id) =>
+    VIA_EXTENSION_PROXY ? `${API_BASE}/task?id=${encodeURIComponent(id)}` : `${API_BASE}/tasks/${encodeURIComponent(id)}`,
+  pick: (id) =>
+    VIA_EXTENSION_PROXY ? `${API_BASE}/pick` : `${API_BASE}/tasks/${encodeURIComponent(id)}/pick`,
 };
 
 const state = {
@@ -162,8 +170,10 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[c]));
 
-async function api(pathname, options) {
-  const res = await fetch(pathname, options);
+async function api(pathname, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (TOKEN) headers["x-modes-token"] = TOKEN;
+  const res = await fetch(pathname, { ...options, headers });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(body.error || res.statusText), { status: res.status, body });
   return body;
@@ -287,7 +297,7 @@ async function applyPick(id, pick) {
     const task = await api(apiUrl.pick(id), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(EMBEDDED ? { id, pick } : { pick }),
+      body: JSON.stringify(VIA_EXTENSION_PROXY ? { id, pick } : { pick }),
     });
     renderDetail(task);
     refreshTaskList();

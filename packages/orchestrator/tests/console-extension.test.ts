@@ -4,13 +4,14 @@
  *
  * The extension is plain CommonJS run by aioncore's Node extension host, so
  * these tests require() the scripts directly. Covered: manifest shape
- * (route paths, entry points, asset dir), the panel API-base injection done
+ * (route paths, entry points, asset dir), the panel globals injection done
  * by onActivate (single source of truth stays panel/index.html), the panel
- * contract the injection relies on, and the apiRoute proxy handlers' mapping
- * onto the console server's REST API (with an injected fake fetch).
+ * contract the injection relies on, the shared token file read-or-create,
+ * and the apiRoute proxy handlers' mapping onto the console server's REST
+ * API (with an injected fake fetch).
  */
 
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -84,22 +85,25 @@ describe('modes-console extension manifest', () => {
 });
 
 describe('panel embedding contract', () => {
-  it('panel/index.html keeps the script marker and MODES_API_BASE hook used by onActivate', () => {
+  it('panel/index.html keeps the script marker and the MODES_API_BASE/MODES_TOKEN hooks', () => {
     const html = readFileSync(PANEL_PATH, 'utf8');
     expect(html).toContain('<script>\n"use strict";');
     expect(html).toContain('window.MODES_API_BASE');
+    expect(html).toContain('window.MODES_TOKEN');
+    expect(html).toContain('"x-modes-token"');
   });
 
-  it('buildEmbeddedPanel injects the extension API base and keeps the panel intact', () => {
+  it('buildEmbeddedPanel injects the direct console API base and the shared token', () => {
     const html = readFileSync(PANEL_PATH, 'utf8');
-    const embedded = activate.buildEmbeddedPanel(html) as string;
-    expect(embedded).toContain('window.MODES_API_BASE = "/modes-console/api";');
+    const embedded = activate.buildEmbeddedPanel(html, 'tok-123') as string;
+    expect(embedded).toContain('window.MODES_API_BASE = "http://127.0.0.1:4177/api";');
+    expect(embedded).toContain('window.MODES_TOKEN = "tok-123";');
     expect(embedded).toContain('"use strict";');
     expect(embedded.length).toBeGreaterThan(html.length);
   });
 
   it('buildEmbeddedPanel fails loudly when the marker drifts', () => {
-    expect(() => activate.buildEmbeddedPanel('<html>no marker</html>')).toThrow(/marker/);
+    expect(() => activate.buildEmbeddedPanel('<html>no marker</html>', 't')).toThrow(/marker/);
   });
 });
 
@@ -123,12 +127,13 @@ describe('syncPanelAsset', () => {
     return extDir;
   }
 
-  it('copies the panel into assets/ with the API-base override applied', () => {
+  it('copies the panel into assets/ with the API-base override and token applied', () => {
     const extDir = makeLayout();
     const dest = activate.syncPanelAsset(extDir) as string;
     expect(dest).toBe(path.join(extDir, 'assets/index.html'));
     const written = readFileSync(dest, 'utf8');
-    expect(written).toContain('window.MODES_API_BASE = "/modes-console/api";');
+    expect(written).toContain('window.MODES_API_BASE = "http://127.0.0.1:4177/api";');
+    expect(written).toMatch(/window\.MODES_TOKEN = "[0-9a-f-]{36}";/);
   });
 
   it('is idempotent and refreshes a stale copy', () => {
@@ -145,7 +150,7 @@ describe('console server discovery and spawn', () => {
   it('isConsoleRunning is true only when the console answers OK', async () => {
     const okFetch = vi.fn().mockResolvedValue(jsonResponse(200, []));
     await expect(activate.isConsoleRunning(okFetch)).resolves.toBe(true);
-    expect(okFetch.mock.calls[0][0]).toBe('http://127.0.0.1:4177/api/tasks');
+    expect(okFetch.mock.calls[0][0]).toBe('http://127.0.0.1:4177/api/health');
 
     const failFetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
     await expect(activate.isConsoleRunning(failFetch)).resolves.toBe(false);
@@ -229,5 +234,46 @@ describe('apiRoute proxy handlers', () => {
     expect(url).toBe('http://127.0.0.1:4177/api/tasks/t1/pick');
     expect(JSON.parse(init.body as string)).toEqual({ pick: 'A' });
     expect(res.statusCode).toBe(200);
+  });
+
+  it('forward attaches the shared token as x-modes-token (env override path)', async () => {
+    process.env.MODES_CONSOLE_TOKEN = 'env-tok';
+    try {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, []));
+      const res = makeRes();
+      await forward({ method: 'GET' }, res, '/api/tasks', undefined, fetchImpl);
+      expect(fetchImpl.mock.calls[0][1].headers['x-modes-token']).toBe('env-tok');
+    } finally {
+      delete process.env.MODES_CONSOLE_TOKEN;
+    }
+  });
+});
+
+describe('ensureConsoleToken (activate.js CJS copy)', () => {
+  let sandbox = '';
+
+  afterEach(() => {
+    if (sandbox) rmSync(sandbox, { recursive: true, force: true });
+    sandbox = '';
+  });
+
+  function makeExtDir(): string {
+    const root = mkdtempSync(path.join(tmpdir(), 'modes-tok-'));
+    const extDir = path.join(root, 'packages/orchestrator/extension/modes-console');
+    mkdirSync(extDir, { recursive: true });
+    sandbox = root;
+    return extDir;
+  }
+
+  it('creates the token file (0600) on first call and reuses it after', () => {
+    const extDir = makeExtDir();
+    const token = activate.ensureConsoleToken(extDir) as string;
+    expect(token).toMatch(/^[0-9a-f-]{36}$/);
+    const tokenPath = path.resolve(extDir, '../../.modes-console-token');
+    expect(readFileSync(tokenPath, 'utf8').trim()).toBe(token);
+    if (process.platform !== 'win32') {
+      expect(statSync(tokenPath).mode & 0o777).toBe(0o600);
+    }
+    expect(activate.ensureConsoleToken(extDir)).toBe(token);
   });
 });

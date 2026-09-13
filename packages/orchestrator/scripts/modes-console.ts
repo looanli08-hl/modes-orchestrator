@@ -7,15 +7,20 @@
  * reviewer/synthesizer, same as modes-run.ts. State is in-memory only —
  * restarting the console forgets every task (the JSONL event log on disk
  * remains the durable record).
+ *
+ * The API is gated by a bearer token shared with the AionUi extension via
+ * packages/orchestrator/.modes-console-token (created on first run, 0600).
  */
 
 import { createConsoleServer } from '../src/server/consoleServer';
+import { ensureConsoleToken } from '../src/server/consoleToken';
 import { mergeLane } from '../src/gate/mergeLane';
 import { recordUserPick } from '../src/gate/recordUserPick';
 import { runBrainstorm } from '../src/patterns/brainstorm';
 import { runTask } from '../src/run/runTask';
 
 const port = Number(process.env.PORT ?? 4177);
+const token = ensureConsoleToken();
 
 const LANES = [
   { lane: 'A', cli: 'kimi' },
@@ -23,6 +28,7 @@ const LANES = [
 ];
 
 const server = createConsoleServer({
+  token,
   runCompete: ({ repoPath, prompt }) => runTask({ repoPath, prompt, lanes: LANES, reviewerCli: 'kimi' }),
   runBrainstormTask: ({ workDir, prompt }) =>
     runBrainstorm({ prompt, lanes: LANES, synthesizerCli: 'kimi', workDir }),

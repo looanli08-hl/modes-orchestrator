@@ -4,6 +4,12 @@
  * and the API is a thin JSON wrapper over the engine. Engine calls are injected as
  * narrow deps so tests feed fakes; real wiring lives in scripts/modes-console.ts.
  * Engine runs are async — POST returns immediately and the panel polls for state.
+ *
+ * Security: when deps.token is set (the scripts/modes-console.ts default, shared
+ * via packages/orchestrator/.modes-console-token), all /api/* routes require a
+ * matching x-modes-token header; CORS is fully open so the AionUi-embedded panel
+ * (served from aioncore's origin) can call the API cross-origin — the token, not
+ * CORS, is the access control. GET /api/health is public for liveness probes.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -38,6 +44,13 @@ export interface BrainstormEngineResult {
 }
 
 export interface ConsoleDeps {
+  /**
+   * Bearer token gating /api/* (header: x-modes-token). When set, every API
+   * route requires it; GET /api/health stays public for liveness probes and
+   * GET / stays public (it serves the panel, with the token injected for
+   * same-origin/loopback readers only). Unset = legacy open behavior.
+   */
+  token?: string;
   runCompete(options: { repoPath: string; prompt: string }): Promise<CompeteEngineResult>;
   runBrainstormTask(options: { workDir: string; prompt: string }): Promise<BrainstormEngineResult>;
   recordPick(
@@ -56,6 +69,36 @@ export interface ConsoleServerOptions {
 
 const BODY_LIMIT_BYTES = 1024 * 1024;
 const PANEL_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../panel/index.html');
+
+// Anchor inside panel/index.html before which the token is injected when the
+// panel is served. Shared convention with the AionUi extension's activate.js
+// (embedded copy injection) — if the panel is restructured, both fail loudly.
+const PANEL_SCRIPT_MARKER = '<script>\n"use strict";';
+
+/**
+ * Inject window.MODES_TOKEN into the panel HTML. Cross-origin browser readers
+ * (arbitrary webpages — reachable because we serve permissive CORS, see below)
+ * must NOT receive the token, so injection is skipped when the request carries
+ * a non-loopback Origin header. Same-origin panel loads and curl send no (or a
+ * loopback) Origin and get the token.
+ */
+export function injectPanelToken(html: string, token: string | undefined, origin: string | undefined): string {
+  if (!token) return html;
+  if (origin && !isLoopbackOrigin(origin)) return html;
+  if (!html.includes(PANEL_SCRIPT_MARKER)) {
+    throw new Error('panel/index.html no longer contains the expected <script> marker; update consoleServer.ts');
+  }
+  return html.replace(PANEL_SCRIPT_MARKER, `<script>window.MODES_TOKEN = ${JSON.stringify(token)};</script>\n${PANEL_SCRIPT_MARKER}`);
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '[::1]';
+  } catch {
+    return false;
+  }
+}
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -185,13 +228,35 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
   };
 
   return http.createServer(async (req, res) => {
+    // Permissive CORS on every response: the AionUi-embedded panel is served
+    // from aioncore's origin and calls this server cross-origin. Safe here
+    // only because the token gates /api/* — CORS controls what browsers may
+    // READ, not what they may do; without a matching x-modes-token header a
+    // cross-origin page gets 401s. (GET / is the exception and deliberately
+    // withholds the injected token from non-loopback Origins.)
+    res.setHeader('access-control-allow-origin', '*');
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'access-control-allow-methods': 'GET, POST, OPTIONS',
+        'access-control-allow-headers': 'content-type, x-modes-token',
+      });
+      return res.end();
+    }
+
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const pickMatch = /^\/api\/tasks\/([^/]+)\/pick$/.exec(url.pathname);
     const taskMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname);
 
     try {
+      // public liveness probe (used by the extension's activate.js)
+      if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true });
+
+      if (deps.token && url.pathname.startsWith('/api/') && req.headers['x-modes-token'] !== deps.token) {
+        return sendJson(res, 401, { error: 'unauthorized: missing or wrong x-modes-token header' });
+      }
+
       if (req.method === 'GET' && url.pathname === '/') {
-        const html = await readFile(panelPath);
+        const html = injectPanelToken(await readFile(panelPath, 'utf8'), deps.token, req.headers.origin);
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
         return res.end(html);
       }

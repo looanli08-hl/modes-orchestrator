@@ -8,6 +8,9 @@
 
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -121,6 +124,92 @@ describe('GET /', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     expect(await res.text()).toContain('modes console');
+  });
+});
+
+describe('token auth + CORS', () => {
+  const TOKEN = 'test-token-123';
+  const authedDeps = () => ({ ...makeFakeDeps().deps, token: TOKEN });
+
+  it('GET /api/health is public, with and without a token configured', async () => {
+    const open = await startServer(makeFakeDeps().deps);
+    expect((await fetch(`${open}/api/health`)).status).toBe(200);
+
+    const gated = await startServer(authedDeps());
+    const res = await fetch(`${gated}/api/health`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it('rejects /api/* without or with a wrong token (401), accepts the right one', async () => {
+    const baseUrl = await startServer(authedDeps());
+    expect((await fetch(`${baseUrl}/api/tasks`)).status).toBe(401);
+    expect((await fetch(`${baseUrl}/api/tasks`, { headers: { 'x-modes-token': 'wrong' } })).status).toBe(401);
+
+    const res = await fetch(`${baseUrl}/api/tasks`, { headers: { 'x-modes-token': TOKEN } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it('keeps legacy open behavior when no token is configured', async () => {
+    const baseUrl = await startServer(makeFakeDeps().deps);
+    expect((await fetch(`${baseUrl}/api/tasks`)).status).toBe(200);
+  });
+
+  it('answers OPTIONS preflight with the token header allowed', async () => {
+    const baseUrl = await startServer(authedDeps());
+    const res = await fetch(`${baseUrl}/api/tasks`, { method: 'OPTIONS' });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('access-control-allow-methods')).toBe('GET, POST, OPTIONS');
+    expect(res.headers.get('access-control-allow-headers')).toBe('content-type, x-modes-token');
+  });
+
+  it('carries access-control-allow-origin: * on API responses (401s included)', async () => {
+    const baseUrl = await startServer(authedDeps());
+    const unauthorized = await fetch(`${baseUrl}/api/tasks`);
+    expect(unauthorized.headers.get('access-control-allow-origin')).toBe('*');
+    const ok = await fetch(`${baseUrl}/api/health`);
+    expect(ok.headers.get('access-control-allow-origin')).toBe('*');
+  });
+});
+
+describe('GET / token injection', () => {
+  const TOKEN = 'test-token-123';
+
+  it('injects window.MODES_TOKEN into the panel when a token is configured', async () => {
+    const baseUrl = await startServer({ ...makeFakeDeps().deps, token: TOKEN });
+    const html = await (await fetch(`${baseUrl}/`)).text();
+    expect(html).toContain(`window.MODES_TOKEN = "${TOKEN}";`);
+  });
+
+  it('withholds the token from cross-origin browser readers (non-loopback Origin)', async () => {
+    const baseUrl = await startServer({ ...makeFakeDeps().deps, token: TOKEN });
+    const html = await (
+      await fetch(`${baseUrl}/`, { headers: { origin: 'https://evil.example' } })
+    ).text();
+    expect(html).not.toContain('MODES_TOKEN = ');
+    // a loopback Origin (e.g. the WebUI front door on another local port) still gets it
+    const local = await (
+      await fetch(`${baseUrl}/`, { headers: { origin: 'http://127.0.0.1:25808' } })
+    ).text();
+    expect(local).toContain(`window.MODES_TOKEN = "${TOKEN}";`);
+  });
+
+  it('fails loudly (500) when the panel marker drifts and a token is configured', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'modes-panel-'));
+    const panelPath = path.join(dir, 'index.html');
+    writeFileSync(panelPath, '<html>no marker</html>');
+    try {
+      const server = createConsoleServer({ ...makeFakeDeps().deps, token: TOKEN }, { panelPath });
+      servers.push(server);
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const { port } = server.address() as AddressInfo;
+      const res = await fetch(`http://127.0.0.1:${port}/`);
+      expect(res.status).toBe(500);
+      expect(await res.json()).toMatchObject({ error: expect.stringContaining('marker') });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
