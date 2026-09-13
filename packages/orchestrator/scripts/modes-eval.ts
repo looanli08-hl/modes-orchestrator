@@ -20,6 +20,7 @@ import { runEval, type ScenarioResult } from '../src/eval/runEval';
 import { mergeLane } from '../src/gate/mergeLane';
 import { recordUserPick } from '../src/gate/recordUserPick';
 import { runBrainstorm } from '../src/patterns/brainstorm';
+import { runCascade } from '../src/patterns/cascade';
 import { runTask } from '../src/run/runTask';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -35,7 +36,7 @@ if (scenarios.length === 0) {
 
 console.log(`modes-eval: ${scenarios.length} scenario(s), real CLIs (lanes kimi+qwen, reviewer/synthesizer kimi)\n`);
 
-const results = await runEval(scenarios, { runTask, runBrainstorm, recordPick: recordUserPick, mergeLane });
+const results = await runEval(scenarios, { runTask, runBrainstorm, runCascade, recordPick: recordUserPick, mergeLane });
 
 function formatRow(r: ScenarioResult): string {
   const status = r.pass ? 'PASS' : 'FAIL';

@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { checkExpectations, decidePick, runEval, type EvalDeps, type ScenarioResult } from '../src/eval/runEval';
 import type { EvalScenario } from '../src/eval/scenarios';
 import { recordUserPick } from '../src/gate/recordUserPick';
+import type { CascadeResult } from '../src/patterns/cascade';
 import type { RunTaskResult } from '../src/run/runTask';
 import { EVENT_LOG_SCHEMA_VERSION, type EventLogRole } from '../src/schema/eventLog';
 import { appendEvent, readEvents } from '../src/store/eventLogStore';
@@ -109,6 +110,35 @@ function makeFakeRunBrainstorm(config: {
   };
 }
 
+/** fake runCascade: records one worker event per attempt into a real JSONL log, returns a scripted winner */
+function makeFakeRunCascade(config: {
+  attempts: { cli: string; outcome: 'success' | 'failed' }[];
+  winnerLevel: number | null;
+}): EvalDeps['runCascade'] {
+  return async (options) => {
+    const taskId = 'task-fake';
+    const eventsFile = path.join(options.repoPath, '.modes', 'events.jsonl');
+    const attempts: CascadeResult['attempts'] = [];
+    for (const [i, attempt] of config.attempts.entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- append-only log: writes must stay ordered
+      await appendFakeEvent(eventsFile, taskId, 'cascade', 'worker', attempt.outcome);
+      attempts.push({ level: i + 1, cli: attempt.cli, outcome: attempt.outcome, latency: 1 });
+    }
+    const winner: CascadeResult['winner'] =
+      config.winnerLevel === null
+        ? null
+        : {
+            level: config.winnerLevel,
+            cli: config.attempts[config.winnerLevel - 1].cli,
+            summary: 'winner summary',
+            diff: 'diff from winner',
+            worktreePath: path.join(options.repoPath, '.modes-worktrees', `${taskId}-cascade-${config.winnerLevel}`),
+            branch: `modes/${taskId}-cascade-${config.winnerLevel}`,
+          };
+    return { taskId, winner, attempts, eventsFile };
+  };
+}
+
 /** fake mergeLane: simulates the real merge by landing its exact commit subject */
 const fakeMergeLane: EvalDeps['mergeLane'] = async ({ repoPath, taskId, pick }) => {
   await execFileAsync(
@@ -122,6 +152,7 @@ function makeDeps(overrides: Partial<EvalDeps> = {}): EvalDeps {
   return {
     runTask: makeFakeRunTask({ outcomes: { A: 'success', B: 'success' } }),
     runBrainstorm: makeFakeRunBrainstorm({ outcomes: { A: 'success', B: 'success' }, synthesis: 'combined' }),
+    runCascade: makeFakeRunCascade({ attempts: [{ cli: 'cheap', outcome: 'success' }], winnerLevel: 1 }),
     recordPick: recordUserPick,
     mergeLane: fakeMergeLane,
     ...overrides,
@@ -140,6 +171,14 @@ const BRAINSTORM: EvalScenario = {
   mode: 'brainstorm',
   prompt: 'think about something',
   expect: { minLaneSuccess: 2, expectSynthesis: true },
+};
+
+const CASCADE: EvalScenario = {
+  id: 'fake-cascade',
+  mode: 'cascade',
+  prompt: 'do something cheap first',
+  chain: [{ cli: 'cheap' }, { cli: 'strong' }],
+  expect: { expectWinnerLevel: 1, expectAttempts: 1 },
 };
 
 describe('decidePick', () => {
@@ -308,6 +347,63 @@ describe('runEval', () => {
     trackTempDir(missing);
     expect(missing[0].pass).toBe(false);
     expect(missing[0].failures[0]).toContain('synthesis');
+  });
+
+  it('cascade happy path: level-1 winner is auto-picked, merged, and verified', async () => {
+    const results = await runEval([CASCADE], makeDeps());
+    trackTempDir(results);
+
+    const r = results[0];
+    expect(r.pass).toBe(true);
+    expect(r.pick).toBe('cascade-1');
+    expect(r.eventCount).toBe(2); // 1 worker + gate
+    expect(r.laneOutcomes).toEqual({ 'cascade-1': 'success' });
+
+    const { stdout } = await execFileAsync('git', ['log', '--format=%s'], { cwd: r.workDir });
+    expect(stdout).toContain('user pick: lane cascade-1 (task-fake)');
+    const events = await readEvents(r.eventsFile!);
+    expect(events.find((e) => e.role === 'gate')?.verifier).toBe('human:cascade-1');
+  });
+
+  it('cascade: expectation violations on winner level and attempt count fail readably', async () => {
+    const results = await runEval(
+      [CASCADE],
+      makeDeps({
+        runCascade: makeFakeRunCascade({
+          attempts: [
+            { cli: 'cheap', outcome: 'failed' },
+            { cli: 'strong', outcome: 'success' },
+          ],
+          winnerLevel: 2,
+        }),
+      })
+    );
+    trackTempDir(results);
+    expect(results[0].pass).toBe(false);
+    expect(results[0].failures.some((f) => f.includes('winner at level 1'))).toBe(true);
+    expect(results[0].failures.some((f) => f.includes('1 attempt(s)'))).toBe(true);
+  });
+
+  it('cascade chain exhausted: pick neither, no merge commit lands', async () => {
+    const scenario: EvalScenario = { ...CASCADE, expect: { expectAttempts: 2 } };
+    const results = await runEval(
+      [scenario],
+      makeDeps({
+        runCascade: makeFakeRunCascade({
+          attempts: [
+            { cli: 'cheap', outcome: 'failed' },
+            { cli: 'strong', outcome: 'failed' },
+          ],
+          winnerLevel: null,
+        }),
+      })
+    );
+    trackTempDir(results);
+
+    expect(results[0].pass).toBe(true);
+    expect(results[0].pick).toBe('neither');
+    const { stdout } = await execFileAsync('git', ['log', '--format=%s'], { cwd: results[0].workDir });
+    expect(stdout.trim()).toBe('seed');
   });
 
   it('scenario lanes override: the declared lanes reach runTask instead of EVAL_LANES', async () => {

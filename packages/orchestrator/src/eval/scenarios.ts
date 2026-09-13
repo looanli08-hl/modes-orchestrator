@@ -22,16 +22,22 @@ export interface EvalExpectation {
   expectReview?: boolean;
   /** brainstorm: a synthesis must exist (requires >= 1 successful lane) */
   expectSynthesis?: boolean;
+  /** cascade: the winner must come from exactly this chain level */
+  expectWinnerLevel?: number;
+  /** cascade: the chain must stop after exactly this many attempts (early stop = no wasted quota) */
+  expectAttempts?: number;
 }
 
 export interface EvalScenario {
   id: string;
-  mode: 'compete' | 'brainstorm';
+  mode: 'compete' | 'brainstorm' | 'cascade';
   prompt: string;
-  /** files to seed into the temp git repo before running (compete) */
+  /** files to seed into the temp git repo before running (compete, cascade) */
   seedFiles?: Record<string, string>;
   /** compete lane override; defaults to EVAL_LANES (kimi A / qwen B) in runEval */
   lanes?: { lane: string; cli: string }[];
+  /** cascade chain override (cheapest first); defaults to EVAL_CHAIN (qwen → kimi) in runEval */
+  chain?: { cli: string; timeoutMs?: number }[];
   expect: EvalExpectation;
 }
 
@@ -98,5 +104,13 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
       'Propose three names for a CLI tool that orchestrates parallel AI coding agents, ' +
       'with a one-line rationale for each.',
     expect: { minLaneSuccess: 2, expectSynthesis: true },
+  },
+  {
+    id: 'cascade-basic',
+    mode: 'cascade',
+    // Simple enough that the cheap level (qwen) should succeed with a real diff on the
+    // first try: the chain must stop at level 1 without spending kimi quota.
+    prompt: 'Create a file named hello.txt containing exactly one line of text.',
+    expect: { expectWinnerLevel: 1, expectAttempts: 1 },
   },
 ];

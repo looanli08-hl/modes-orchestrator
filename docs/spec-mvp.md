@@ -34,7 +34,7 @@
 | `compete`（默认，已实现） | 产出型任务（写代码/写文档） | 2 路 fan-out → 交叉评审（VERDICT + PICK）→ 人挑一稿合并 | 最终拍板 |
 | `brainstorm`（已实现） | 思考型任务（想方案/比思路） | N 路 fan-out（无 worktree、无合并）→ 一路综合多样性 → 呈现全集 + 综合 | 只看不动手 |
 | `solo` | 快速问答 | 单路直出 | — |
-| `cascade` | 省钱优先 | 便宜先上失败升级 | backlog |
+| `cascade`（已实现） | 省钱优先 | 串行降级链：便宜先上，仅客观信号升级（outcome ≠ success 或 success 但零 diff），直到某级"成功且非空 diff"或链耗尽 → 人决定 merge 或不要 | 最终拍板 |
 | 高风险 gate | 动核心代码 | compete + 测试验证 gate | backlog |
 
 N 路约定：fanOut/settle/JSONL 天然 N 路；评审与 gate 已泛化到 N 路（PICK/pick 为任意 lane 字母，按本场 lanes 校验）；更复杂的 N 路策略（锦标赛/排序）进 backlog。

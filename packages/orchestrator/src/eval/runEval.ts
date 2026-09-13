@@ -17,6 +17,7 @@ import type { MergeLaneOptions } from '../gate/mergeLane';
 import type { RecordUserPickOptions } from '../gate/recordUserPick';
 import type { UserPick } from '../gate/userGate';
 import type { BrainstormOptions, BrainstormResult } from '../patterns/brainstorm';
+import type { CascadeOptions, CascadeResult } from '../patterns/cascade';
 import type { RunTaskOptions, RunTaskResult } from '../run/runTask';
 import { readEvents } from '../store/eventLogStore';
 import type { EvalScenario } from './scenarios';
@@ -29,9 +30,13 @@ export const EVAL_LANES = [
   { lane: 'B', cli: 'qwen' },
 ];
 
+/** the eval cascade chain: cheapest first */
+export const EVAL_CHAIN = [{ cli: 'qwen' }, { cli: 'kimi' }];
+
 export interface EvalDeps {
   runTask: (options: RunTaskOptions) => Promise<RunTaskResult>;
   runBrainstorm: (options: BrainstormOptions) => Promise<BrainstormResult>;
+  runCascade: (options: CascadeOptions) => Promise<CascadeResult>;
   recordPick: (eventsFile: string, options: RecordUserPickOptions) => Promise<void>;
   mergeLane: (options: MergeLaneOptions) => Promise<void>;
 }
@@ -70,11 +75,16 @@ interface Observation {
   hasReview: boolean;
   /** null when the scenario mode has no synthesis concept */
   hasSynthesis: boolean | null;
+  /** cascade: the winning chain level, null when the chain was exhausted, undefined otherwise */
+  winnerLevel?: number | null;
+  /** cascade: how many levels ran before the chain stopped */
+  attemptCount?: number;
 }
 
 export function checkExpectations(scenario: EvalScenario, obs: Observation): string[] {
   const failures: string[] = [];
-  const { minLaneSuccess, maxLaneSuccess, expectReview, expectSynthesis } = scenario.expect;
+  const { minLaneSuccess, maxLaneSuccess, expectReview, expectSynthesis, expectWinnerLevel, expectAttempts } =
+    scenario.expect;
   if (minLaneSuccess !== undefined && obs.laneSuccesses < minLaneSuccess) {
     failures.push(`expected >= ${minLaneSuccess} successful lane(s), got ${obs.laneSuccesses}`);
   }
@@ -92,6 +102,14 @@ export function checkExpectations(scenario: EvalScenario, obs: Observation): str
   }
   if (expectSynthesis === false && obs.hasSynthesis === true) {
     failures.push('expected no synthesis, got one');
+  }
+  if (expectWinnerLevel !== undefined && obs.winnerLevel !== expectWinnerLevel) {
+    failures.push(
+      `expected a winner at level ${expectWinnerLevel}, got ${obs.winnerLevel == null ? 'no winner' : `level ${obs.winnerLevel}`}`
+    );
+  }
+  if (expectAttempts !== undefined && obs.attemptCount !== expectAttempts) {
+    failures.push(`expected ${expectAttempts} attempt(s), got ${obs.attemptCount ?? 'unknown'}`);
   }
   return failures;
 }
@@ -240,6 +258,70 @@ async function runBrainstormScenario(
   };
 }
 
+async function runCascadeScenario(scenario: EvalScenario, deps: EvalDeps, failures: string[]): Promise<ScenarioResult> {
+  const workDir = await mkdtemp(path.join(os.tmpdir(), `modes-eval-${scenario.id}-`));
+  await seedRepo(workDir, scenario.seedFiles);
+
+  const result = await deps.runCascade({
+    repoPath: workDir,
+    prompt: scenario.prompt,
+    chain: scenario.chain ?? EVAL_CHAIN,
+    taskType: `eval:${scenario.id}`,
+  });
+
+  failures.push(
+    ...checkExpectations(scenario, {
+      laneSuccesses: result.attempts.filter((a) => a.outcome === 'success').length,
+      hasReview: false,
+      hasSynthesis: null,
+      winnerLevel: result.winner?.level ?? null,
+      attemptCount: result.attempts.length,
+    })
+  );
+
+  // The harness plays the human gate: a winner is "merge it", no winner is "neither".
+  const pick: UserPick = result.winner ? `cascade-${result.winner.level}` : 'neither';
+  await deps.recordPick(result.eventsFile, { taskId: result.taskId, pick, reviewVerdict: null });
+
+  if (result.winner) {
+    try {
+      await deps.mergeLane({
+        repoPath: workDir,
+        worktreePath: result.winner.worktreePath,
+        branch: result.winner.branch,
+        taskId: result.taskId,
+        pick,
+      });
+    } catch (err) {
+      failures.push(`mergeLane failed: ${String(err)}`);
+    }
+    // A cascade winner has a non-empty diff by construction, so the merge commit
+    // must exist — no empty-diff no-op case like compete has.
+    const subjects = await headSubjects(workDir);
+    if (!subjects.includes(`user pick: lane ${pick} (${result.taskId})`)) {
+      failures.push(`merge commit for ${pick} not found on the current branch`);
+    }
+  } else {
+    const subjects = await headSubjects(workDir);
+    if (subjects.some((s) => s.startsWith('user pick:'))) {
+      failures.push('chain exhausted (no winner) but a merge commit landed on the current branch');
+    }
+  }
+
+  const stats = await collectEventStats(result.eventsFile);
+  return {
+    scenarioId: scenario.id,
+    pass: failures.length === 0,
+    failures,
+    durationMs: 0, // filled in by runScenario
+    eventsFile: result.eventsFile,
+    workDir,
+    pick,
+    laneOutcomes: Object.fromEntries(result.attempts.map((a) => [`cascade-${a.level}`, a.outcome])),
+    ...stats,
+  };
+}
+
 async function runScenario(scenario: EvalScenario, deps: EvalDeps): Promise<ScenarioResult> {
   const started = Date.now();
   const failures: string[] = [];
@@ -247,7 +329,9 @@ async function runScenario(scenario: EvalScenario, deps: EvalDeps): Promise<Scen
     const result =
       scenario.mode === 'compete'
         ? await runCompeteScenario(scenario, deps, failures)
-        : await runBrainstormScenario(scenario, deps, failures);
+        : scenario.mode === 'brainstorm'
+          ? await runBrainstormScenario(scenario, deps, failures)
+          : await runCascadeScenario(scenario, deps, failures);
     result.durationMs = Date.now() - started;
     result.pass = result.failures.length === 0;
     return result;
