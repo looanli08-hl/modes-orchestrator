@@ -342,6 +342,41 @@ describe('compete flow', () => {
     expect(res.status).toBe(404);
   });
 
+  it('N lanes: pick C is accepted and merges lane C', async () => {
+    const { deps, compete } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createCompeteTask(baseUrl);
+    const threeLane = makeCompeteResult();
+    threeLane.lanes.push({ lane: 'C', outcome: 'success', summary: 'summary C', diff: 'diff C', worktreePath: '/wt/c', branch: 'modes/t-C' });
+    compete.resolve(threeLane);
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+
+    const res = await postJson(baseUrl, `/api/tasks/${id}/pick`, { pick: 'C' });
+    expect(res.status).toBe(200);
+    expect(deps.mergeLane).toHaveBeenCalledWith({
+      repoPath: '/repo',
+      worktreePath: '/wt/c',
+      branch: 'modes/t-C',
+      taskId: 'task-eng-1',
+      pick: 'C',
+    });
+  });
+
+  it('N lanes: a pick outside the task lanes is rejected with 400 listing the options', async () => {
+    const { deps, compete } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createCompeteTask(baseUrl);
+    const threeLane = makeCompeteResult();
+    threeLane.lanes.push({ lane: 'C', outcome: 'success', summary: 'summary C', diff: 'diff C', worktreePath: '/wt/c', branch: 'modes/t-C' });
+    compete.resolve(threeLane);
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+
+    const res = await postJson(baseUrl, `/api/tasks/${id}/pick`, { pick: 'D' });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('neither');
+    expect(deps.mergeLane).not.toHaveBeenCalled();
+  });
+
   it('keeps the task awaiting_pick with an error field when the merge fails', async () => {
     const { deps, compete } = makeFakeDeps();
     vi.mocked(deps.mergeLane).mockRejectedValueOnce(new Error('merge_conflict: resolve manually'));

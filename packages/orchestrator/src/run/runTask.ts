@@ -1,8 +1,8 @@
 /**
- * runTask — the walking skeleton (spec-mvp §1): one prompt → fan-out to 2 CLI lanes
+ * runTask — the walking skeleton (spec-mvp §1): one prompt → fan-out to N CLI lanes
  * in isolated worktrees → cross-review → await the human's pick. Every step lands in
  * the JSONL event log (spec-mvp §5); failures degrade and are recorded, never retried
- * (A6); when both lanes fail the review is skipped and the double failure is presented
+ * (A6); when every lane fails the review is skipped and the failure is presented
  * honestly (port-spec §2B).
  */
 
@@ -51,7 +51,7 @@ export async function runTask(options: RunTaskOptions): Promise<RunTaskResult> {
   const taskId = `task-${Date.now().toString(36)}`;
   const eventsFile = path.join(options.repoPath, '.modes', 'events.jsonl');
   await mkdir(path.dirname(eventsFile), { recursive: true });
-  const lifecycle = createTaskLifecycle(taskId);
+  const lifecycle = createTaskLifecycle(taskId, { lanes: options.lanes.map((l) => l.lane) });
   const store = createResultStore();
   const deps = makeRealDeps(options.repoPath, { taskId, timeoutMs: options.timeoutMs });
 
@@ -130,7 +130,7 @@ export async function runTask(options: RunTaskOptions): Promise<RunTaskResult> {
     const parsed = parseWorkerOutput(raw);
     review =
       parsed.outcome === 'success'
-        ? parseReviewVerdict(parsed.summary)
+        ? parseReviewVerdict(parsed.summary, options.lanes.map((l) => l.lane))
         : { verdict: 'failed', rationale: parsed.summary, pick: null };
 
     await appendEvent(eventsFile, {

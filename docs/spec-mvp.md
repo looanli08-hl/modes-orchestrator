@@ -37,7 +37,7 @@
 | `cascade` | 省钱优先 | 便宜先上失败升级 | backlog |
 | 高风险 gate | 动核心代码 | compete + 测试验证 gate | backlog |
 
-N 路约定：fanOut/settle/JSONL 天然 N 路；评审与 gate 的 A/B 二态是 compete 的 MVP 简化，N 路 compete（锦标赛/排序）进 backlog。
+N 路约定：fanOut/settle/JSONL 天然 N 路；评审与 gate 已泛化到 N 路（PICK/pick 为任意 lane 字母，按本场 lanes 校验）；更复杂的 N 路策略（锦标赛/排序）进 backlog。
 
 ## 3. 架构约束
 

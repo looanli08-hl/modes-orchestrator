@@ -58,7 +58,7 @@ async function appendFakeEvent(eventsFile: string, taskId: string, lane: string,
 
 interface FakeTaskConfig {
   outcomes: Record<string, 'success' | 'failed'>;
-  review?: { verdict: 'agreed' | 'disagreed' | 'failed'; pick: 'A' | 'B' | 'tie' | null; rationale: string } | null;
+  review?: { verdict: 'agreed' | 'disagreed' | 'failed'; pick: string | null; rationale: string } | null;
   /** when true, successful lanes report an empty diff (lane ran but changed nothing) */
   emptyDiffs?: boolean;
 }
@@ -179,6 +179,20 @@ describe('decidePick', () => {
     };
     expect(decidePick(result)).toBe('neither');
   });
+
+  it('N lanes: follows a recommendation for any lane letter in this run', () => {
+    const result: RunTaskResult = {
+      ...base,
+      lanes: [...base.lanes, { lane: 'C', outcome: 'success', summary: '', diff: '', worktreePath: '', branch: '' }],
+      review: { verdict: 'agreed', pick: 'C', rationale: '' },
+    };
+    expect(decidePick(result)).toBe('C');
+  });
+
+  it('N lanes: a recommendation for a lane not in this run is not followed', () => {
+    const result = { ...base, review: { verdict: 'agreed' as const, pick: 'C', rationale: '' } };
+    expect(decidePick(result)).toBe('A');
+  });
 });
 
 describe('checkExpectations', () => {
@@ -294,6 +308,29 @@ describe('runEval', () => {
     trackTempDir(missing);
     expect(missing[0].pass).toBe(false);
     expect(missing[0].failures[0]).toContain('synthesis');
+  });
+
+  it('scenario lanes override: the declared lanes reach runTask instead of EVAL_LANES', async () => {
+    const threeLanes = [
+      { lane: 'A', cli: 'kimi' },
+      { lane: 'B', cli: 'qwen' },
+      { lane: 'C', cli: 'kimi' },
+    ];
+    const scenario: EvalScenario = { ...COMPETE, lanes: threeLanes, expect: { minLaneSuccess: 2, expectReview: true } };
+    let seenLanes: unknown;
+    const results = await runEval(
+      [scenario],
+      makeDeps({
+        runTask: async (options) => {
+          seenLanes = options.lanes;
+          return makeFakeRunTask({ outcomes: { A: 'success', B: 'success', C: 'success' } })(options);
+        },
+      })
+    );
+    trackTempDir(results);
+
+    expect(seenLanes).toEqual(threeLanes);
+    expect(results[0].pass).toBe(true);
   });
 
   it('a throwing scenario fails without stopping later scenarios', async () => {

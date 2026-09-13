@@ -145,6 +145,7 @@ export function createTaskRegistry(): TaskRegistry {
   };
 }
 
-export function isUserPick(value: unknown): value is UserPick {
-  return value === 'A' || value === 'B' || value === 'neither';
+/** a pick is valid for a task when it is "neither" or one of that task's lane letters */
+export function isUserPick(value: unknown, lanes: string[]): value is UserPick {
+  return value === 'neither' || (typeof value === 'string' && lanes.includes(value));
 }

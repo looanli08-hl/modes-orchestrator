@@ -30,6 +30,8 @@ export interface EvalScenario {
   prompt: string;
   /** files to seed into the temp git repo before running (compete) */
   seedFiles?: Record<string, string>;
+  /** compete lane override; defaults to EVAL_LANES (kimi A / qwen B) in runEval */
+  lanes?: { lane: string; cli: string }[];
   expect: EvalExpectation;
 }
 
@@ -70,6 +72,24 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
     // that a review verdict was recorded, never the verdict/pick value itself.
     prompt: 'Write a debounce function in utils.js with JSDoc and a leading-edge option.',
     expect: { expectReview: true },
+  },
+  {
+    id: 'three-lane',
+    mode: 'compete',
+    // N-lane compete: lane C is kimi's second independent attempt — this validates the
+    // N-lane mechanism (fan-out, review pick, gate) with the CLIs we have today; swap
+    // in a third vendor's CLI once one joins the pool.
+    lanes: [
+      { lane: 'A', cli: 'kimi' },
+      { lane: 'B', cli: 'qwen' },
+      { lane: 'C', cli: 'kimi' },
+    ],
+    // Open-ended enough that lanes plausibly take different approaches (parking queue vs
+    // counter+await vs batch drain); we only assert the pipeline ran, never which lane wins.
+    // The subject must not mention rate limits/quotas — workerOutput's quota detector
+    // would read the prompt echo as a quota failure (false positive, flagged 2026-09-13).
+    prompt: 'Implement a concurrency pool in pool.js: run async tasks with at most 3 in flight at a time, exposing a simple run(task) API.',
+    expect: { minLaneSuccess: 2, expectReview: true },
   },
   {
     id: 'brainstorm-basic',

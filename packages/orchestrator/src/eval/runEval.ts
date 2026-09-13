@@ -59,7 +59,7 @@ export interface ScenarioResult {
 export function decidePick(result: RunTaskResult): UserPick {
   const successful = result.lanes.filter((l) => l.outcome === 'success');
   const recommended = result.review?.pick;
-  if ((recommended === 'A' || recommended === 'B') && successful.some((l) => l.lane === recommended)) {
+  if (recommended && recommended !== 'tie' && successful.some((l) => l.lane === recommended)) {
     return recommended;
   }
   return successful.length > 0 ? (successful[0].lane as UserPick) : 'neither';
@@ -131,7 +131,7 @@ async function runCompeteScenario(scenario: EvalScenario, deps: EvalDeps, failur
   const result = await deps.runTask({
     repoPath: workDir,
     prompt: scenario.prompt,
-    lanes: EVAL_LANES,
+    lanes: scenario.lanes ?? EVAL_LANES,
     reviewerCli: 'kimi',
     taskType: `eval:${scenario.id}`,
   });

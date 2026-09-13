@@ -1,7 +1,8 @@
 /**
  * Task-level lifecycle + user gate — port-spec §2B / §4 row 7 (Orca decision_gate).
  * pending → fanning_out → reviewing → awaiting_user_pick → done.
- * Only an explicit user pick ("A" | "B" | "neither") can leave awaiting_user_pick:
+ * Only an explicit user pick (a lane letter or "neither", validated against the
+ * task's lanes) can leave awaiting_user_pick:
  * no programmatic event, timer, or review outcome may — the merge decision always
  * belongs to a human (spec-mvp §1). Both lanes failed skips review and lands in
  * awaiting_user_pick directly (port-spec §2B; hermes "all advisors failed → skip
@@ -16,7 +17,12 @@ export type TaskState = (typeof TASK_STATES)[number];
 export type TaskEvent = 'begin_fanout' | 'fanout_done' | 'fanout_all_failed' | 'review_done';
 
 export const USER_PICK_OPTIONS = ['A', 'B', 'neither'] as const;
-export type UserPick = (typeof USER_PICK_OPTIONS)[number];
+/**
+ * A human gate decision: "neither", or one of the task's lane letters (uppercase).
+ * Widened from the USER_PICK_OPTIONS union to string when compete generalized to N
+ * lanes — the valid lane set is per-task, passed to createTaskLifecycle.
+ */
+export type UserPick = string;
 
 export interface GateResolution {
   verifier: 'human';
@@ -39,9 +45,11 @@ export interface TaskLifecycle {
   userPick(pick: UserPick): void;
 }
 
-export function createTaskLifecycle(taskId: string): TaskLifecycle {
+export function createTaskLifecycle(taskId: string, opts?: { lanes?: string[] }): TaskLifecycle {
   let state: TaskState = 'pending';
   let resolution: GateResolution | null = null;
+  const lanes = opts?.lanes ?? ['A', 'B'];
+  const pickOptions = [...lanes, 'neither'];
 
   return {
     taskId,
@@ -71,8 +79,8 @@ export function createTaskLifecycle(taskId: string): TaskLifecycle {
           `task ${taskId} is in state "${state}"; user pick requires awaiting_user_pick`
         );
       }
-      if (!(USER_PICK_OPTIONS as readonly string[]).includes(pick)) {
-        throw new OrchestratorError('invalid_pick', `pick "${pick}" is not one of ${USER_PICK_OPTIONS.join(', ')}`);
+      if (!pickOptions.includes(pick)) {
+        throw new OrchestratorError('invalid_pick', `pick "${pick}" is not one of ${pickOptions.join(', ')}`);
       }
       resolution = { verifier: 'human', pick };
       state = 'done';

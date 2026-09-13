@@ -29,6 +29,16 @@ describe('buildReviewPrompt: both lanes presented for judgment', () => {
     expect(prompt).toContain('PICK:');
     expect(prompt).toContain('TIE');
   });
+
+  it('N lanes: enumerates every lane letter in the PICK instruction', () => {
+    const threeLanes = [...lanes, { lane: 'C', summary: 'recursive descent', diff: 'diff --git a/p.ts ...' }];
+    const prompt = buildReviewPrompt({ task: 'implement a JSON parser', lanes: threeLanes });
+
+    expect(prompt).toContain('PICK: A');
+    expect(prompt).toContain('PICK: C');
+    expect(prompt).toContain('PICK: TIE');
+    expect(prompt).toContain('=== LANE C ===');
+  });
 });
 
 describe('parseReviewVerdict: marker-driven, never fabricates consensus', () => {
@@ -70,11 +80,20 @@ describe('parseReviewVerdict: PICK marker — quality recommendation, never fabr
   });
 
   it.each([
-    ['missing PICK', 'VERDICT: AGREE'],
-    ['malformed PICK', 'VERDICT: AGREE\nPICK: C'],
-    ['empty', ''],
-  ])('%s → pick is null (a recommendation is never invented)', (_label, text) => {
-    expect(parseReviewVerdict(text).pick).toBeNull();
+    ['missing PICK', 'VERDICT: AGREE', undefined],
+    ['PICK naming a lane outside knownLanes', 'VERDICT: AGREE\nPICK: C', ['A', 'B']],
+    ['empty', '', undefined],
+  ])('%s → pick is null (a recommendation is never invented)', (_label, text, knownLanes) => {
+    expect(parseReviewVerdict(text, knownLanes).pick).toBeNull();
+  });
+
+  it('N lanes: any known lane letter is a usable pick', () => {
+    expect(parseReviewVerdict('VERDICT: AGREE\nPICK: C', ['A', 'B', 'C']).pick).toBe('C');
+    expect(parseReviewVerdict('VERDICT: AGREE\npick:  d', ['A', 'B', 'C', 'D']).pick).toBe('D');
+  });
+
+  it('without knownLanes any single letter is accepted (legacy 2-lane callers)', () => {
+    expect(parseReviewVerdict('VERDICT: AGREE\nPICK: C').pick).toBe('C');
   });
 
   it('PICK never rescues a malformed VERDICT — verdict failed stays failed', () => {

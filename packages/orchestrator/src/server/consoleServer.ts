@@ -191,11 +191,13 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
       return sendJson(res, 400, { error: 'invalid JSON body' });
     }
     const { pick } = (body ?? {}) as Record<string, unknown>;
-    if (!isUserPick(pick)) {
-      return sendJson(res, 400, { error: "pick must be 'A', 'B', or 'neither'" });
-    }
     if (task.mode !== 'compete' || task.status !== 'awaiting_pick' || !task.compete || !task.eventsFile || !task.engineTaskId) {
       return sendJson(res, 409, { error: `task ${taskId} is not awaiting a pick (status: ${task.status})` });
+    }
+    // validated against this task's lanes, not a hardcoded A/B — compete is N-lane
+    const laneLetters = task.compete.lanes.map((l) => l.lane);
+    if (!isUserPick(pick, laneLetters)) {
+      return sendJson(res, 400, { error: `pick must be one of ${[...laneLetters, 'neither'].join(', ')}` });
     }
 
     try {

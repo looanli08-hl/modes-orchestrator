@@ -73,3 +73,32 @@ describe('user-gate: only a user pick can leave awaiting_user_pick', () => {
     );
   });
 });
+
+describe('user-gate: N lanes (lanes option)', () => {
+  function threeLaneAtUserPick() {
+    const lifecycle = createTaskLifecycle('task-1', { lanes: ['A', 'B', 'C'] });
+    lifecycle.advance('begin_fanout');
+    lifecycle.advance('fanout_done');
+    lifecycle.advance('review_done');
+    return lifecycle;
+  }
+
+  it('accepts any declared lane letter', () => {
+    const lifecycle = threeLaneAtUserPick();
+    lifecycle.userPick('C');
+    expect(lifecycle.state).toBe('done');
+    expect(lifecycle.resolution).toEqual({ verifier: 'human', pick: 'C' });
+  });
+
+  it('still accepts "neither"', () => {
+    const lifecycle = threeLaneAtUserPick();
+    lifecycle.userPick('neither');
+    expect(lifecycle.state).toBe('done');
+  });
+
+  it('rejects a letter outside the declared lanes, listing the actual options', () => {
+    const lifecycle = threeLaneAtUserPick();
+    expect(() => lifecycle.userPick('D')).toThrowError(/A, B, C, neither/);
+    expect(lifecycle.state).toBe('awaiting_user_pick');
+  });
+});

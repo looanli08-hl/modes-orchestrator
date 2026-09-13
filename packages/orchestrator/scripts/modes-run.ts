@@ -80,11 +80,14 @@ if (result.review?.pick) {
 }
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const answer = await new Promise<string>((resolve) => rl.question('\nPick A / B / neither? ', resolve));
+const laneLetters = result.lanes.map((l) => l.lane);
+const answer = await new Promise<string>((resolve) =>
+  rl.question(`\nPick ${laneLetters.join(' / ')} / neither? `, resolve)
+);
 rl.close();
 
 const pick = answer.trim().toUpperCase();
-const normalized: UserPick = pick === 'A' || pick === 'B' ? pick : 'neither';
+const normalized: UserPick = laneLetters.includes(pick) ? pick : 'neither';
 
 await recordUserPick(result.eventsFile, {
   taskId: result.taskId,
