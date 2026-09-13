@@ -91,3 +91,15 @@
 1. 用户实测 AionUi 桌面端里的扩展面板（无头链路已全通，桌面端 iframe 渲染是最后一厘米）
 2. console 状态持久化（重启即丢）
 3. backlog：N 路 compete（锦标赛）、cascade 模式
+
+### 踩坑：dev 模式起不来的根因（21:47 启动失败）
+
+`bun run dev` 报"AionCore 启动失败"，日志 `stage: resolve_binary`：dev 模式 `process.resourcesPath` 指向 Electron 内部目录，bundled 查找必然落空 → 走 PATH 也找不到。解法：显式指二进制——
+
+```bash
+AIONUI_EXTENSIONS_PATH=$PWD/packages/orchestrator/extension \
+AIONUI_BACKEND_BIN=$PWD/resources/bundled-aioncore/darwin-arm64/aioncore \
+bun run dev
+```
+
+带两个变量重启后实测：aioncore 起在 51296、`/api/extensions` 列出 modes-console（enabled）、settings tab 注册、面板 HTML 里 `MODES_API_BASE`/`MODES_TOKEN` 注入齐全。
