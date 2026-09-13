@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>modes console</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #59636e;
+    --border: #d1d9e0;
+    --surface: #f6f8fa;
+    --accent: #0969da;
+    --ok: #1a7f37;
+    --bad: #d1242f;
+    --warn: #9a6700;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 16px; font-weight: 600; margin: 0; }
+  header span { color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 49px); }
+  aside { border-right: 1px solid var(--border); padding: 16px; }
+  section#detail { padding: 24px; max-width: 1100px; }
+
+  form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+  .mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .mode-toggle button {
+    flex: 1; padding: 6px 0; border: 0; background: var(--bg); color: var(--muted);
+    font: inherit; cursor: pointer;
+  }
+  .mode-toggle button.active { background: var(--surface); color: var(--fg); font-weight: 600; }
+  textarea, input[type="text"] {
+    width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+    font: inherit; background: var(--bg); color: var(--fg);
+  }
+  textarea { min-height: 72px; resize: vertical; }
+  textarea:focus, input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button.primary {
+    padding: 6px 14px; border: 1px solid rgba(0,0,0,0.1); border-radius: 6px;
+    background: var(--fg); color: #fff; font: inherit; font-weight: 500; cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+
+  .task-list { display: flex; flex-direction: column; gap: 4px; }
+  .task-item {
+    padding: 8px 10px; border-radius: 6px; cursor: pointer; border: 1px solid transparent;
+  }
+  .task-item:hover { background: var(--surface); }
+  .task-item.selected { background: var(--surface); border-color: var(--border); }
+  .task-item .prompt {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px;
+  }
+  .task-item .meta { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+
+  .badge {
+    display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px;
+    border: 1px solid var(--border); color: var(--muted); background: var(--surface);
+  }
+  .badge.ok { color: var(--ok); border-color: rgba(26,127,55,0.35); }
+  .badge.bad { color: var(--bad); border-color: rgba(209,36,47,0.35); }
+  .badge.warn { color: var(--warn); border-color: rgba(154,103,0,0.35); }
+
+  .banner {
+    border: 1px solid var(--border); border-radius: 6px; background: var(--surface);
+    padding: 12px 16px; margin: 16px 0;
+  }
+  .banner .verdict { font-weight: 600; }
+  .error-box {
+    border: 1px solid rgba(209,36,47,0.4); border-radius: 6px; background: #fff8f8;
+    color: var(--bad); padding: 12px 16px; margin: 16px 0; font-size: 13px;
+  }
+  .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  .lanes.single { grid-template-columns: 1fr; }
+  .lane-card { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .lane-card header {
+    padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .lane-card header h3 { margin: 0; font-size: 13px; font-weight: 600; }
+  .lane-card .body { padding: 12px; }
+  .lane-card .body p { margin: 0 0 12px; white-space: pre-wrap; }
+  pre {
+    font-family: var(--mono); font-size: 12px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 6px; padding: 10px;
+    overflow: auto; max-height: 400px; margin: 0; white-space: pre;
+  }
+  .pick-bar { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
+  .pick-bar button {
+    padding: 6px 16px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); font: inherit; font-weight: 500; cursor: pointer;
+  }
+  .pick-bar button:hover { background: var(--surface); }
+  .muted { color: var(--muted); font-size: 13px; }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  #detail .placeholder { color: var(--muted); margin-top: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>modes console</h1>
+  <span>local orchestration panel</span>
+</header>
+<main>
+  <aside>
+    <form id="run-form">
+      <div class="mode-toggle">
+        <button type="button" id="mode-compete" class="active">compete</button>
+        <button type="button" id="mode-brainstorm">brainstorm</button>
+      </div>
+      <textarea id="prompt" placeholder="Describe the task…" required></textarea>
+      <input type="text" id="repo-path" placeholder="Repo path (must be a git repo); empty = cwd of the console" />
+      <button class="primary" id="run-btn" type="submit">Run</button>
+    </form>
+    <div class="task-list" id="task-list"></div>
+  </aside>
+  <section id="detail">
+    <p class="placeholder">Run a task or select one from the list.</p>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+const state = {
+  mode: "compete",
+  selectedId: null,
+  pollTimer: null,
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+}[c]));
+
+async function api(pathname, options) {
+  const res = await fetch(pathname, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(body.error || res.statusText), { status: res.status, body });
+  return body;
+}
+
+function statusBadge(status) {
+  const cls = status === "done" ? "ok" : status === "failed" ? "bad" : status === "awaiting_pick" ? "warn" : "";
+  return `<span class="badge ${cls}">${esc(status.replace("_", " "))}</span>`;
+}
+
+function outcomeBadge(outcome) {
+  return `<span class="badge ${outcome === "success" ? "ok" : "bad"}">${esc(outcome)}</span>`;
+}
+
+async function refreshTaskList() {
+  const tasks = await api("/api/tasks");
+  $("task-list").innerHTML = tasks.map((t) => `
+    <div class="task-item ${t.id === state.selectedId ? "selected" : ""}" data-id="${esc(t.id)}">
+      <div class="prompt">${esc(t.prompt)}</div>
+      <div class="meta">${statusBadge(t.status)}<span class="muted">${esc(t.mode)}</span></div>
+    </div>`).join("");
+  for (const el of document.querySelectorAll(".task-item")) {
+    el.addEventListener("click", () => selectTask(el.dataset.id));
+  }
+}
+
+function stopPolling() {
+  if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+}
+
+function startPolling() {
+  stopPolling();
+  state.pollTimer = setInterval(async () => {
+    if (!state.selectedId) return stopPolling();
+    const task = await api(`/api/tasks/${state.selectedId}`);
+    renderDetail(task);
+    refreshTaskList();
+    if (task.status !== "running") stopPolling();
+  }, 2000);
+}
+
+async function selectTask(id) {
+  state.selectedId = id;
+  const task = await api(`/api/tasks/${id}`);
+  renderDetail(task);
+  refreshTaskList();
+  if (task.status === "running") startPolling(); else stopPolling();
+}
+
+function renderDetail(task) {
+  const detail = $("detail");
+  let html = `
+    <h2>${esc(task.prompt)}</h2>
+    <div class="muted">${esc(task.mode)} · ${esc(task.repoPath)} · ${statusBadge(task.status)}</div>
+    ${task.error ? `<div class="error-box">${esc(task.error)}</div>` : ""}`;
+
+  if (task.status === "running") {
+    html += `<p class="muted" style="margin-top:24px">Running — lanes are working…</p>`;
+  } else if (task.mode === "compete") {
+    html += renderCompete(task);
+  } else {
+    html += renderBrainstorm(task);
+  }
+  detail.innerHTML = html;
+
+  if (task.status === "awaiting_pick") {
+    for (const pick of ["A", "B", "neither"]) {
+      $(`pick-${pick}`).addEventListener("click", () => applyPick(task.id, pick));
+    }
+  }
+}
+
+function renderCompete(task) {
+  let html = "";
+  if (task.review) {
+    const rec = task.review.pick === "tie" ? "TIE — comparable quality"
+      : task.review.pick ? `reviewer recommends lane ${task.review.pick}` : "no recommendation";
+    html += `<div class="banner">
+      <div><span class="verdict">verdict: ${esc(task.review.verdict)}</span> · ${esc(rec)}</div>
+      <div class="muted">${esc(task.review.rationale)}</div>
+    </div>`;
+  }
+  html += `<div class="lanes">` + (task.lanes || []).map((l) => `
+    <div class="lane-card">
+      <header><h3>Lane ${esc(l.lane)}</h3>${outcomeBadge(l.outcome)}</header>
+      <div class="body">
+        <p>${esc(l.summary || "(no summary)")}</p>
+        ${l.diff ? `<pre>${esc(l.diff)}</pre>` : `<p class="muted">(no changes)</p>`}
+      </div>
+    </div>`).join("") + `</div>`;
+  if (task.status === "awaiting_pick") {
+    html += `<div class="pick-bar">
+      <button id="pick-A">Pick A</button>
+      <button id="pick-B">Pick B</button>
+      <button id="pick-neither">Neither</button>
+      <span class="muted">merges the picked lane into the current branch</span>
+    </div>`;
+  } else if (task.status === "done") {
+    html += `<p class="muted" style="margin-top:16px">Pick recorded — task done.</p>`;
+  }
+  return html;
+}
+
+function renderBrainstorm(task) {
+  let html = `<div class="lanes single">` + (task.lanes || []).map((l) => `
+    <div class="lane-card">
+      <header><h3>Lane ${esc(l.lane)}</h3>${outcomeBadge(l.outcome)}</header>
+      <div class="body"><p>${esc(l.answer || "(no answer)")}</p></div>
+    </div>`).join("") + `</div>`;
+  if (task.synthesis) {
+    html += `<div class="banner"><div class="verdict">synthesis</div>
+      <div class="muted" style="white-space:pre-wrap">${esc(task.synthesis)}</div></div>`;
+  } else if (task.status === "done") {
+    html += `<p class="muted" style="margin-top:16px">Synthesis skipped — all lanes failed.</p>`;
+  }
+  return html;
+}
+
+async function applyPick(id, pick) {
+  try {
+    const task = await api(`/api/tasks/${id}/pick`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pick }),
+    });
+    renderDetail(task);
+    refreshTaskList();
+  } catch (err) {
+    const task = await api(`/api/tasks/${id}`);
+    renderDetail(task);
+    alert(`Pick failed: ${err.message}`);
+  }
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  $("mode-compete").classList.toggle("active", mode === "compete");
+  $("mode-brainstorm").classList.toggle("active", mode === "brainstorm");
+  $("repo-path").style.display = mode === "compete" ? "" : "none";
+}
+
+$("mode-compete").addEventListener("click", () => setMode("compete"));
+$("mode-brainstorm").addEventListener("click", () => setMode("brainstorm"));
+
+$("run-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const prompt = $("prompt").value.trim();
+  if (!prompt) return;
+  const repoPath = $("repo-path").value.trim();
+  $("run-btn").disabled = true;
+  try {
+    const { id } = await api("/api/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: state.mode, prompt, ...(repoPath ? { repoPath } : {}) }),
+    });
+    $("prompt").value = "";
+    await refreshTaskList();
+    await selectTask(id);
+  } catch (err) {
+    alert(`Run failed: ${err.message}`);
+  } finally {
+    $("run-btn").disabled = false;
+  }
+});
+
+setMode("compete");
+refreshTaskList();
+</script>
+</body>
+</html>
