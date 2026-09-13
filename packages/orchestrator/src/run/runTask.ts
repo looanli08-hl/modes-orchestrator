@@ -128,7 +128,10 @@ export async function runTask(options: RunTaskOptions): Promise<RunTaskResult> {
       cwd: options.repoPath,
     });
     const parsed = parseWorkerOutput(raw);
-    review = parsed.outcome === 'success' ? parseReviewVerdict(parsed.summary) : { verdict: 'failed', rationale: parsed.summary };
+    review =
+      parsed.outcome === 'success'
+        ? parseReviewVerdict(parsed.summary)
+        : { verdict: 'failed', rationale: parsed.summary, pick: null };
 
     await appendEvent(eventsFile, {
       schema_version: EVENT_LOG_SCHEMA_VERSION,
