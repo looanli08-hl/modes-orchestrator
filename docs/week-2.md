@@ -139,3 +139,12 @@ bun run dev
 - [x] 15 新场景：10 种 compete 任务类型（bug-fix/add-tests/refactor/docs/css/config/multi-file/error-handling/py-to-js/arg-parse）+ 3 brainstorm 题材 + four-lane + cascade-harder（新 expectWinner 断言：正常终止即可，不断言哪级赢）
 - [x] **全量真实跑 22/22 一次全绿**，零校准。观察：cascade-harder 也被 qwen 一级解决——升级路径要验需明显超出 qwen 能力的题；数据已入 eval-runs.jsonl
 - 测试总数 184 全绿
+
+## Day 2 续 — console 接 cascade + 定时 eval + 模式路由器（auto 模式）
+
+- [x] **console/面板接 cascade**：chain 默认 qwen→kimi 可覆盖；attempts+winner 视图；pick 收敛为 cascade-N|neither；扩展零改动自动跟上。真实冒烟全链路（qwen 一级胜、merge 落盘、错级 pick 400）
+- [x] **launchd 每日 04:17 全量 eval**（com.modes.eval + eval-nightly.sh，PATH 钉死）： kickstart 实测 + 04:17 首火（23 场景）均确认运行
+- [x] **模式路由器（auto 模式）**：`router/classifyTask.ts`（数据驱动规则表：显式多方案→compete；咨询信号无交付物名词→brainstorm；执行动词/兜底→cascade）+ `runRouted.ts`（路由决策写 task_type=`auto:<mode>`，零 schema 改动进 JSONL）。modes-run/console/eval 三处接线，panel 显示"auto → 模式 · 原因"
+- [x] **评测器第三功（严重）**：qwen 的 bin 是 launcher 脚本，超时 kill 只杀壳不杀孙进程 → stdio 管道被占 → lane 永久挂起（429 风暴中实测复现）。修复：detached 进程组 + 负 pid 组杀（spawn-process-kill.test.ts 锁定）
+- [x] 运维实录：429 风暴期间多个 eval 并发（launchd 04:17 火 + 手动回归 + 被 kill 运行的孤儿 lane），全部按进程族谱厘清；误伤排查确认 tty 上的交互 kimi 会话不动
+- 测试总数 247 全绿
