@@ -119,3 +119,9 @@ bun run dev
 - [x] **评测器第二功**：three-lane 最初 5 次全报 quota_exhausted——查实为误报：prompt 让写"rate limiter"，CLI 回显关键词即被 quota 检测误判（exit 0 也查全量输出）。修复：exit 0 时仅当输出 < 300 字符（纯道歉无产出）才判 quota_exhausted；短输出真 quota（如 "rate limit hit, stopped early"）行为不变。TDD 红→绿
 - [x] three-lane 场景 prompt 改回 rate limiter 题材，兼任该 bug 的真实回归
 - 测试总数 154 全绿
+
+## Day 1 续 7 — console 任务持久化
+
+- [x] taskRegistry 加 persistence 适配器注入 + `filePersistence.ts`（原子写 `.modes-console-tasks.json`，gitignored）；僵尸 running 任务 load 时如实标 failed；修剪最近 100 条；pick 指针（worktreePath/branch）一并持久化，重启后 awaiting_pick 仍可 pick。12 新测试，总数 166 全绿
+- [x] 冒烟：server 重启后任务历史和详情完整恢复（4299 端口实测）
+- [x] 4177 的 console 已重启为最新版（持久化 + token + N 路），旧内存实例已清
