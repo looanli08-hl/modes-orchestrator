@@ -42,7 +42,7 @@ describe('docs-impl-drift: JSONL schema matches spec-mvp §5', () => {
     expect([...EVENT_LOG_OUTCOME_VALUES].toSorted()).toEqual(['failed', 'quota_exhausted', 'success', 'timeout']);
   });
 
-  it('role enum is exactly worker/reviewer/gate (§5, gate added 2026-09-13 for human pick records)', () => {
-    expect([...EVENT_LOG_ROLE_VALUES].toSorted()).toEqual(['gate', 'reviewer', 'worker']);
+  it('role enum is exactly worker/reviewer/gate/synthesizer (§5, gate+synthesizer added 2026-09-13)', () => {
+    expect([...EVENT_LOG_ROLE_VALUES].toSorted()).toEqual(['gate', 'reviewer', 'synthesizer', 'worker']);
   });
 });

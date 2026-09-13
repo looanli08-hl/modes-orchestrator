@@ -55,3 +55,11 @@
 4. ~~【backlog 决策点】评审加推荐路输出~~ ✅ 2026-09-13 完成：评审 prompt 升级为双标记——`VERDICT` 判对错 + `PICK: A/B/TIE` 判优劣；缺 PICK 标记 = null 不伪造（8 新测试）。真实复跑鹦鹉任务：评审给出 "PICK: A" 且理由细化到解剖结构/车架合理性。modes-run 展示"评审推荐"行
 5. ~~【backlog】recordUserPick 手动触发~~ ✅ `scripts/modes-run.ts` 交互命令已串起全流程：fan-out → 展示双路 diff + 评审 → 问 pick → `recordUserPick` + `mergeLane`（含 merge 冲突自动 abort 回滚，2 测试）。验证：piped pick B 端到端跑通，git log 留 merge 痕，JSONL 4 条记录齐（worker×2 / reviewer / gate）
 6. 【backlog】任务状态持久化（task JSON，port-spec §3）——modes-run 单进程内闭环已成立，持久化的价值变成"跨会话恢复/历史列表"，优先级下降
+
+## Day 1 续 2 — 编排模式落地（spec-mvp §2.5）
+
+- [x] spec-mvp 修订：模式表（compete 默认 / brainstorm / solo / cascade / 高风险 gate）+ N 路约定（fanOut/settle/JSONL 天然 N 路，评审与 gate 的 A/B 二态是 compete 的 MVP 简化）
+- [x] role 枚举 +`synthesizer`（spec-mvp §5 第二次同日修订，drift 契约同步）
+- [x] `patterns/brainstorm`：N 路并行回答（**无 worktree 无合并**——思考型任务不碰 git）→ 一路综合多样性；单路失败降级照跑，全失败跳过综合不伪造（3 集成测试）
+- [x] `modes-run --mode brainstorm` 接线
+- [x] 真实双路验证（"付费主题商店能成吗"）：综合器保留了双路多样性、裁决了 lane B 的内部矛盾、升级了结论。**观察到的毛病**：kimi 综合器自作主张在 workDir 写了一个分析文档——brainstorm 语义上是纯思考，lane 该不该禁写文件，留作设计问题（候选：prompt 里声明 / 跑在隔离 scratch 目录）

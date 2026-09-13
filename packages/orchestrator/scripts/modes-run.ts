@@ -1,10 +1,11 @@
 /**
- * modes-run — the MVP as one interactive command (spec-mvp §1 walking skeleton,
- * user-facing): fan-out → cross-review → show both diffs → you pick → merge.
+ * modes-run — the MVP as one interactive command (spec-mvp §1 + §2.5).
  *
- * Usage:  bun packages/orchestrator/scripts/modes-run.ts "<prompt>" [repoPath]
+ * Usage:  bun packages/orchestrator/scripts/modes-run.ts [--mode compete|brainstorm] "<prompt>" [repoPath]
  *         echo A | bun ...modes-run.ts ...   (piped pick, for testing)
- * repoPath defaults to the current directory (must be a git repo).
+ * compete (default): fan-out → cross-review → show both diffs → you pick → merge.
+ *   repoPath defaults to the current directory (must be a git repo).
+ * brainstorm: N lanes answer in parallel → synthesis of the diversity. No pick, no merge.
  */
 
 import path from 'node:path';
@@ -13,14 +14,44 @@ import readline from 'node:readline';
 import { mergeLane } from '../src/gate/mergeLane';
 import { recordUserPick } from '../src/gate/recordUserPick';
 import type { UserPick } from '../src/gate/userGate';
+import { runBrainstorm } from '../src/patterns/brainstorm';
 import { runTask } from '../src/run/runTask';
 
-const prompt = process.argv[2];
-if (!prompt) {
-  console.error('usage: bun modes-run.ts "<prompt>" [repoPath]');
+const args = process.argv.slice(2);
+const modeFlagIndex = args.indexOf('--mode');
+const mode = modeFlagIndex >= 0 ? args[modeFlagIndex + 1] : 'compete';
+if (modeFlagIndex >= 0) args.splice(modeFlagIndex, 2);
+
+const prompt = args[0];
+if (!prompt || (mode !== 'compete' && mode !== 'brainstorm')) {
+  console.error('usage: bun modes-run.ts [--mode compete|brainstorm] "<prompt>" [repoPath]');
   process.exit(2);
 }
-const repoPath = path.resolve(process.argv[3] ?? process.cwd());
+const repoPath = path.resolve(args[1] ?? process.cwd());
+
+if (mode === 'brainstorm') {
+  console.log(`prompt: ${prompt}`);
+  console.log('brainstorming with kimi + qwen …\n');
+
+  const result = await runBrainstorm({
+    prompt,
+    lanes: [
+      { lane: 'A', cli: 'kimi' },
+      { lane: 'B', cli: 'qwen' },
+    ],
+    synthesizerCli: 'kimi',
+    workDir: repoPath,
+  });
+
+  for (const lane of result.lanes) {
+    console.log(`\n──── LANE ${lane.lane} (${lane.outcome}) ────`);
+    console.log(lane.answer.slice(0, 1500));
+  }
+  console.log(`\n──── SYNTHESIS ────`);
+  console.log(result.synthesis ?? '(skipped — all lanes failed)');
+  console.log(`\nevents: ${result.eventsFile}`);
+  process.exit(0);
+}
 
 console.log(`repo: ${repoPath}`);
 console.log(`prompt: ${prompt}`);

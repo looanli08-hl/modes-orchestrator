@@ -25,6 +25,20 @@
 4. 模型协调者（让模型当 coordinator）——backlog；MVP 的协调者是规则代码 + 人。
 5. GUI 美化——沿用 AionUi 既有界面能力，不为 MVP 新增 UI 打磨。
 
+## 2.5 编排模式（2026-09-13 修订）
+
+任务类型决定编排模式，不是每个任务都走"竞争 + 人挑"。模式由调用方显式指定（`--mode`），自动路由等 JSONL 数据攒够再说。
+
+| 模式 | 适用 | 流程 | 人的角色 |
+|---|---|---|---|
+| `compete`（默认，已实现） | 产出型任务（写代码/写文档） | 2 路 fan-out → 交叉评审（VERDICT + PICK）→ 人挑一稿合并 | 最终拍板 |
+| `brainstorm`（已实现） | 思考型任务（想方案/比思路） | N 路 fan-out（无 worktree、无合并）→ 一路综合多样性 → 呈现全集 + 综合 | 只看不动手 |
+| `solo` | 快速问答 | 单路直出 | — |
+| `cascade` | 省钱优先 | 便宜先上失败升级 | backlog |
+| 高风险 gate | 动核心代码 | compete + 测试验证 gate | backlog |
+
+N 路约定：fanOut/settle/JSONL 天然 N 路；评审与 gate 的 A/B 二态是 compete 的 MVP 简化，N 路 compete（锦标赛/排序）进 backlog。
+
 ## 3. 架构约束
 
 - 全部编排代码放 `packages/orchestrator/`（constitution 第 3 条）。
@@ -55,7 +69,7 @@
 | `task_type` | string | 任务分类（MVP 期允许为 `"unknown"`， schema 必须先占位） |
 | `model` | string | 实际执行的模型标识 |
 | `provider` | string | 端点标识（CLI 名或 API 提供方） |
-| `role` | string | `worker` / `reviewer` / `gate`（gate = 人类 gate 决策记录，对应 port-spec §3：用户选择落 JSONL，`verifier: "human"`；2026-09-13 修订） |
+| `role` | string | `worker` / `reviewer` / `gate` / `synthesizer`（gate = 人类 gate 决策记录，`verifier: "human"`；synthesizer = brainstorm 模式的多样性综合者；2026-09-13 两次修订） |
 | `outcome` | string | `success` / `failed` / `timeout` / `quota_exhausted` |
 | `score` | number \| null | 评审得分（无评审环节则为 null） |
 | `cost` | number \| null | 本次调用成本（免费额度记 0；CLI 未暴露用量时记 null，不伪造） |
