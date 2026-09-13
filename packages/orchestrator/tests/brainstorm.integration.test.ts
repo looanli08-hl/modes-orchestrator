@@ -83,6 +83,24 @@ describe('runBrainstorm: N lanes think, synthesizer combines, no gate', () => {
     expect(events.find((e) => e.lane === 'A')?.outcome).toBe('failed');
   });
 
+  it('a lane that writes files pollutes only the scratch dir, never workDir', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'modes-brainstorm-'));
+    tempDirs.push(dir);
+    const rogue = await makeFakeCli('rogue', 'echo "rogue output"; echo data > rogue.txt');
+    const synth = await makeFakeCli('synth', 'echo "SYNTH"');
+
+    const result = await runBrainstorm({
+      prompt: 'topic',
+      lanes: [{ lane: 'A', cli: rogue }],
+      synthesizerCli: synth,
+      workDir: dir,
+    });
+
+    expect(result.synthesis).toContain('SYNTH');
+    const workDirEntries = await readdir(dir);
+    expect(workDirEntries).toEqual(['.modes']);
+  });
+
   it('all lanes failed → synthesis skipped, not fabricated', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'modes-brainstorm-'));
     tempDirs.push(dir);
