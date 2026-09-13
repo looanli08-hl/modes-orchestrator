@@ -18,6 +18,7 @@ import type { RecordUserPickOptions } from '../gate/recordUserPick';
 import type { UserPick } from '../gate/userGate';
 import type { BrainstormOptions, BrainstormResult } from '../patterns/brainstorm';
 import type { CascadeOptions, CascadeResult } from '../patterns/cascade';
+import { runRouted } from '../router/runRouted';
 import type { RunTaskOptions, RunTaskResult } from '../run/runTask';
 import { readEvents } from '../store/eventLogStore';
 import type { EvalScenario } from './scenarios';
@@ -50,6 +51,8 @@ export interface ScenarioResult {
   /** temp repo (compete) / scratch dir (brainstorm), kept for post-mortem inspection */
   workDir: string;
   pick?: UserPick;
+  /** auto: the mode the router resolved the prompt to */
+  resolvedMode?: string;
   laneOutcomes?: Record<string, string>;
   eventCount?: number;
   /** lane/role → latency ms, read back from the JSONL event log */
@@ -79,12 +82,25 @@ interface Observation {
   winnerLevel?: number | null;
   /** cascade: how many levels ran before the chain stopped */
   attemptCount?: number;
+  /** auto: the mode the router resolved the prompt to */
+  resolvedMode?: string;
 }
 
 export function checkExpectations(scenario: EvalScenario, obs: Observation): string[] {
   const failures: string[] = [];
-  const { minLaneSuccess, maxLaneSuccess, expectReview, expectSynthesis, expectWinnerLevel, expectAttempts, expectWinner } =
-    scenario.expect;
+  const {
+    minLaneSuccess,
+    maxLaneSuccess,
+    expectReview,
+    expectSynthesis,
+    expectWinnerLevel,
+    expectAttempts,
+    expectWinner,
+    expectMode,
+  } = scenario.expect;
+  if (expectMode !== undefined && obs.resolvedMode !== expectMode) {
+    failures.push(`expected the router to resolve mode "${expectMode}", got "${obs.resolvedMode ?? 'unknown'}"`);
+  }
   if (minLaneSuccess !== undefined && obs.laneSuccesses < minLaneSuccess) {
     failures.push(`expected >= ${minLaneSuccess} successful lane(s), got ${obs.laneSuccesses}`);
   }
@@ -282,6 +298,18 @@ async function runCascadeScenario(scenario: EvalScenario, deps: EvalDeps, failur
     taskType: `eval:${scenario.id}`,
   });
 
+  return finalizeCascadeScenario(scenario, result, workDir, deps, failures);
+}
+
+/** expectations + the human-gate reenactment shared by cascade and auto→cascade runs */
+async function finalizeCascadeScenario(
+  scenario: EvalScenario,
+  result: CascadeResult,
+  workDir: string,
+  deps: EvalDeps,
+  failures: string[],
+  resolvedMode?: string
+): Promise<ScenarioResult> {
   failures.push(
     ...checkExpectations(scenario, {
       laneSuccesses: result.attempts.filter((a) => a.outcome === 'success').length,
@@ -289,6 +317,7 @@ async function runCascadeScenario(scenario: EvalScenario, deps: EvalDeps, failur
       hasSynthesis: null,
       winnerLevel: result.winner?.level ?? null,
       attemptCount: result.attempts.length,
+      resolvedMode,
     })
   );
 
@@ -330,7 +359,51 @@ async function runCascadeScenario(scenario: EvalScenario, deps: EvalDeps, failur
     eventsFile: result.eventsFile,
     workDir,
     pick,
+    resolvedMode,
     laneOutcomes: Object.fromEntries(result.attempts.map((a) => [`cascade-${a.level}`, a.outcome])),
+    ...stats,
+  };
+}
+
+/**
+ * auto: the router (runRouted over the injected engines) classifies the prompt
+ * and dispatches; the resolved mode is asserted via expectMode. The only auto
+ * scenario today resolves to cascade, so the gate is the cascade one; a
+ * non-cascade resolution gets its expectations checked without a gate.
+ */
+async function runAutoScenario(scenario: EvalScenario, deps: EvalDeps, failures: string[]): Promise<ScenarioResult> {
+  const workDir = await mkdtemp(path.join(os.tmpdir(), `modes-eval-${scenario.id}-`));
+  await seedRepo(workDir, scenario.seedFiles);
+
+  const { classification, result } = await runRouted(
+    { prompt: scenario.prompt, repoPath: workDir },
+    { runTask: deps.runTask, runBrainstorm: deps.runBrainstorm, runCascade: deps.runCascade }
+  );
+
+  if (classification.mode === 'cascade') {
+    return finalizeCascadeScenario(scenario, result as CascadeResult, workDir, deps, failures, classification.mode);
+  }
+
+  const lanes = (result as RunTaskResult | BrainstormResult).lanes;
+  failures.push(
+    ...checkExpectations(scenario, {
+      laneSuccesses: lanes.filter((l) => l.outcome === 'success').length,
+      hasReview: classification.mode === 'compete' ? (result as RunTaskResult).review !== null : false,
+      hasSynthesis: classification.mode === 'brainstorm' ? (result as BrainstormResult).synthesis !== null : null,
+      resolvedMode: classification.mode,
+    })
+  );
+
+  const stats = await collectEventStats(result.eventsFile);
+  return {
+    scenarioId: scenario.id,
+    pass: failures.length === 0,
+    failures,
+    durationMs: 0, // filled in by runScenario
+    eventsFile: result.eventsFile,
+    workDir,
+    resolvedMode: classification.mode,
+    laneOutcomes: Object.fromEntries(lanes.map((l) => [l.lane, l.outcome])),
     ...stats,
   };
 }
@@ -344,7 +417,9 @@ async function runScenario(scenario: EvalScenario, deps: EvalDeps): Promise<Scen
         ? await runCompeteScenario(scenario, deps, failures)
         : scenario.mode === 'brainstorm'
           ? await runBrainstormScenario(scenario, deps, failures)
-          : await runCascadeScenario(scenario, deps, failures);
+          : scenario.mode === 'auto'
+            ? await runAutoScenario(scenario, deps, failures)
+            : await runCascadeScenario(scenario, deps, failures);
     result.durationMs = Date.now() - started;
     result.pass = result.failures.length === 0;
     return result;

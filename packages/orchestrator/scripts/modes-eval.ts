@@ -46,9 +46,10 @@ function formatRow(r: ScenarioResult): string {
   const status = r.pass ? 'PASS' : 'FAIL';
   const duration = `${(r.durationMs / 1000).toFixed(1)}s`;
   const pick = r.pick ? ` pick=${r.pick}` : '';
+  const routed = r.resolvedMode ? ` auto→${r.resolvedMode}` : '';
   const lanes = r.laneOutcomes ? ` lanes=${JSON.stringify(r.laneOutcomes)}` : '';
   const failures = r.failures.length > 0 ? `\n    failures: ${r.failures.join('; ')}` : '';
-  return `${status}  ${r.scenarioId.padEnd(18)} ${duration.padStart(8)}  events=${r.eventCount ?? '-'}${pick}${lanes}${failures}`;
+  return `${status}  ${r.scenarioId.padEnd(18)} ${duration.padStart(8)}  events=${r.eventCount ?? '-'}${routed}${pick}${lanes}${failures}`;
 }
 
 console.log('\n──── EVAL REPORT ────');

@@ -18,6 +18,8 @@
  * integration tests (tests/run-task.integration.test.ts, tests/brainstorm.integration.test.ts).
  */
 
+import type { RoutedMode } from '../router/classifyTask';
+
 export interface EvalExpectation {
   /** at least this many lanes must end with outcome "success" */
   minLaneSuccess?: number;
@@ -37,11 +39,13 @@ export interface EvalExpectation {
    * bug territory). Never asserts which level won.
    */
   expectWinner?: boolean;
+  /** auto: the router must classify the prompt as exactly this mode */
+  expectMode?: RoutedMode;
 }
 
 export interface EvalScenario {
   id: string;
-  mode: 'compete' | 'brainstorm' | 'cascade';
+  mode: 'compete' | 'brainstorm' | 'cascade' | 'auto';
   tier: 'core' | 'extended';
   prompt: string;
   /** files to seed into the temp git repo before running (compete, cascade) */
@@ -146,6 +150,16 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
     // first try: the chain must stop at level 1 without spending kimi quota.
     prompt: 'Create a file named hello.txt containing exactly one line of text.',
     expect: { expectWinnerLevel: 1, expectAttempts: 1 },
+  },
+  {
+    id: 'auto-exec',
+    mode: 'auto',
+    tier: 'core',
+    // Clearly executional: the router must resolve it to cascade (cheapest first),
+    // which must then terminate properly — a winner at some level, or the chain
+    // fully exhausted. Which level wins is never asserted.
+    prompt: 'Create a file util.js with a clamp function',
+    expect: { expectMode: 'cascade', expectWinner: true },
   },
 
   // ── extended tier: task-type diversity. Expectations are pipeline assertions

@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import type { UserPick } from '../gate/userGate';
 import type { CascadeLevel } from '../patterns/cascade';
 import type { ReviewVerdict } from '../review/crossReview';
+import { classifyTask, type TaskClassification } from '../router/classifyTask';
 import {
   createTaskRegistry,
   isUserPick,
@@ -28,6 +29,7 @@ import {
   type CascadeWinnerState,
   type CompeteLaneState,
   type ConsoleTask,
+  type ConsoleTaskMode,
   type TaskRegistry,
 } from './taskRegistry';
 
@@ -152,6 +154,7 @@ function taskDetailView(task: ConsoleTask): Record<string, unknown> {
     id: task.id,
     engineTaskId: task.engineTaskId,
     mode: task.mode,
+    classification: task.classification,
     prompt: task.prompt,
     repoPath: task.repoPath,
     status: task.status,
@@ -206,8 +209,8 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
       return sendJson(res, 400, { error: 'invalid JSON body' });
     }
     const { mode, prompt, repoPath, chain } = (body ?? {}) as Record<string, unknown>;
-    if (mode !== 'compete' && mode !== 'brainstorm' && mode !== 'cascade') {
-      return sendJson(res, 400, { error: "mode must be 'compete', 'brainstorm' or 'cascade'" });
+    if (mode !== 'compete' && mode !== 'brainstorm' && mode !== 'cascade' && mode !== 'auto') {
+      return sendJson(res, 400, { error: "mode must be 'compete', 'brainstorm', 'cascade' or 'auto'" });
     }
     if (typeof prompt !== 'string' || !prompt.trim()) {
       return sendJson(res, 400, { error: 'prompt must be a non-empty string' });
@@ -218,8 +221,13 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     if (chain !== undefined && !isCascadeChain(chain)) {
       return sendJson(res, 400, { error: 'chain must be a non-empty array of { cli: string, timeoutMs?: number }' });
     }
+    // auto resolves synchronously (classifyTask is a pure function): the task is
+    // created and run under the resolved mode, and the decision is kept on the
+    // record so the panel can show "auto → <mode> · <reason>"
+    const classification: TaskClassification | undefined = mode === 'auto' ? classifyTask(prompt as string) : undefined;
+    const resolvedMode: ConsoleTaskMode = classification ? classification.mode : (mode as ConsoleTaskMode);
     // like modes-run.ts: no repoPath means "the directory the console was started from"
-    const task = registry.create(mode, prompt, path.resolve(repoPath ?? process.cwd()));
+    const task = registry.create(resolvedMode, prompt, path.resolve(repoPath ?? process.cwd()), classification);
     runTaskInBackground(task, chain);
     sendJson(res, 201, { id: task.id });
   };

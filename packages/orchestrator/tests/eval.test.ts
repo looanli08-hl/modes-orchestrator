@@ -184,6 +184,14 @@ const CASCADE: EvalScenario = {
   expect: { expectWinnerLevel: 1, expectAttempts: 1 },
 };
 
+const AUTO: EvalScenario = {
+  id: 'fake-auto',
+  mode: 'auto',
+  tier: 'core',
+  prompt: 'Create a file util.js with a clamp function',
+  expect: { expectMode: 'cascade', expectWinnerLevel: 1, expectAttempts: 1 },
+};
+
 describe('decidePick', () => {
   const base: RunTaskResult = {
     taskId: 't',
@@ -447,6 +455,28 @@ describe('runEval', () => {
     expect(results[0].failures[0]).toContain('engine exploded');
     expect(results[1].pass).toBe(true);
   });
+
+  it('auto: an executional prompt is routed to cascade and gated like a cascade run', async () => {
+    const results = await runEval([AUTO], makeDeps());
+    trackTempDir(results);
+
+    const r = results[0];
+    expect(r.pass).toBe(true);
+    expect(r.resolvedMode).toBe('cascade');
+    expect(r.pick).toBe('cascade-1');
+    expect(r.eventCount).toBe(2); // 1 worker + gate
+
+    const { stdout } = await execFileAsync('git', ['log', '--format=%s'], { cwd: r.workDir });
+    expect(stdout).toContain('user pick: lane cascade-1 (task-fake)');
+  });
+
+  it('auto: an expectMode mismatch fails with a readable reason', async () => {
+    const scenario: EvalScenario = { ...AUTO, expect: { expectMode: 'brainstorm' } };
+    const results = await runEval([scenario], makeDeps());
+    trackTempDir(results);
+    expect(results[0].pass).toBe(false);
+    expect(results[0].failures.some((f) => f.includes('brainstorm') && f.includes('cascade'))).toBe(true);
+  });
 });
 
 describe('checkExpectations: expectWinner', () => {
@@ -514,7 +544,7 @@ describe('EVAL_SCENARIOS definitions', () => {
   it('every scenario has a valid tier, mode, non-empty prompt and at least one expectation', () => {
     for (const s of EVAL_SCENARIOS) {
       expect(['core', 'extended']).toContain(s.tier);
-      expect(['compete', 'brainstorm', 'cascade']).toContain(s.mode);
+      expect(['compete', 'brainstorm', 'cascade', 'auto']).toContain(s.mode);
       expect(s.prompt.trim().length).toBeGreaterThan(0);
       expect(Object.keys(s.expect).length).toBeGreaterThan(0);
     }

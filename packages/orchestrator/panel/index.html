@@ -226,9 +226,12 @@ async function selectTask(id) {
 
 function renderDetail(task) {
   const detail = $("detail");
+  const modeLabel = task.classification
+    ? `auto → ${task.classification.mode} · ${task.classification.reason}`
+    : task.mode;
   let html = `
     <h2>${esc(task.prompt)}</h2>
-    <div class="muted">${esc(task.mode)} · ${esc(task.repoPath)} · ${statusBadge(task.status)}</div>
+    <div class="muted">${esc(modeLabel)} · ${esc(task.repoPath)} · ${statusBadge(task.status)}</div>
     ${task.error ? `<div class="error-box">${esc(task.error)}</div>` : ""}`;
 
   if (task.status === "running") {

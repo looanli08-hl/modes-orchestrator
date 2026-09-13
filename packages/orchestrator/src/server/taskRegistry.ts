@@ -15,6 +15,7 @@
 
 import type { UserPick } from '../gate/userGate';
 import type { ReviewVerdict } from '../review/crossReview';
+import type { TaskClassification } from '../router/classifyTask';
 
 export type ConsoleTaskMode = 'compete' | 'brainstorm' | 'cascade';
 export type ConsoleTaskStatus = 'running' | 'awaiting_pick' | 'done' | 'failed';
@@ -56,6 +57,8 @@ export interface ConsoleTask {
   /** engine taskId, known once the run resolves; null while running */
   engineTaskId: string | null;
   mode: ConsoleTaskMode;
+  /** routing decision when the task was created with mode "auto"; null otherwise */
+  classification: TaskClassification | null;
   prompt: string;
   repoPath: string;
   status: ConsoleTaskStatus;
@@ -78,7 +81,7 @@ export interface ConsoleTaskSummary {
 export interface TaskRegistry {
   /** load persisted state (no-op without persistence); call once before serving */
   init(): Promise<void>;
-  create(mode: ConsoleTaskMode, prompt: string, repoPath: string): ConsoleTask;
+  create(mode: ConsoleTaskMode, prompt: string, repoPath: string, classification?: TaskClassification): ConsoleTask;
   get(id: string): ConsoleTask | undefined;
   list(): ConsoleTaskSummary[];
   completeCompete(
@@ -179,12 +182,13 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
       }
       if (restored > 0) changed(); // persist zombie fixes and pruning
     },
-    create(mode, prompt, repoPath) {
+    create(mode, prompt, repoPath, classification) {
       seq += 1;
       const task: ConsoleTask = {
         id: `console-${Date.now().toString(36)}-${seq}`,
         engineTaskId: null,
         mode,
+        classification: classification ?? null,
         prompt,
         repoPath,
         status: 'running',

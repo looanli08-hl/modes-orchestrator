@@ -591,6 +591,82 @@ describe('cascade flow', () => {
   });
 });
 
+describe('auto mode routing', () => {
+  it('resolves an executional prompt to cascade at request time and stores the classification', async () => {
+    const { deps, cascade } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+
+    const res = await postJson(baseUrl, '/api/tasks', {
+      mode: 'auto',
+      prompt: 'Create a file util.js with a clamp function',
+      repoPath: '/repo',
+    });
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+
+    // classification is synchronous (a pure function): the resolved engine is
+    // already running with the default chain by the time POST returns
+    expect(deps.runCascadeTask).toHaveBeenCalledWith({
+      repoPath: '/repo',
+      prompt: 'Create a file util.js with a clamp function',
+      chain: [{ cli: 'qwen' }, { cli: 'kimi' }],
+    });
+    expect(deps.runCompete).not.toHaveBeenCalled();
+    expect(deps.runBrainstormTask).not.toHaveBeenCalled();
+
+    cascade.resolve(makeCascadeResult(1));
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+
+    const task = await getTask(baseUrl, id);
+    expect(task.mode).toBe('cascade');
+    expect(task.classification).toMatchObject({ mode: 'cascade', confidence: 'high' });
+    expect((task.classification as { reason: string }).reason.length).toBeGreaterThan(0);
+  });
+
+  it('resolves an opinion prompt to brainstorm', async () => {
+    const { deps, brainstorm } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+
+    const res = await postJson(baseUrl, '/api/tasks', { mode: 'auto', prompt: '你怎么看这个方案', repoPath: '/repo' });
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    expect(deps.runBrainstormTask).toHaveBeenCalledWith({ workDir: '/repo', prompt: '你怎么看这个方案' });
+
+    brainstorm.resolve(makeBrainstormResult());
+    await waitForStatus(baseUrl, id, 'done');
+
+    const task = await getTask(baseUrl, id);
+    expect(task.mode).toBe('brainstorm');
+    expect(task.classification).toMatchObject({ mode: 'brainstorm', confidence: 'high' });
+  });
+
+  it('resolves explicit multi-version intent to compete', async () => {
+    const { deps, compete } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+
+    const res = await postJson(baseUrl, '/api/tasks', { mode: 'auto', prompt: '给我两个方案实现防抖', repoPath: '/repo' });
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    expect(deps.runCompete).toHaveBeenCalledWith({ repoPath: '/repo', prompt: '给我两个方案实现防抖' });
+
+    compete.resolve(makeCompeteResult());
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+
+    const task = await getTask(baseUrl, id);
+    expect(task.mode).toBe('compete');
+    expect(task.classification).toMatchObject({ mode: 'compete' });
+  });
+
+  it('explicit-mode tasks carry classification null', async () => {
+    const { deps, compete } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createCompeteTask(baseUrl);
+    compete.resolve(makeCompeteResult());
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+    expect((await getTask(baseUrl, id)).classification).toBeNull();
+  });
+});
+
 describe('engine failure', () => {
   it('lands in failed with the error message surfaced', async () => {
     const { deps, compete } = makeFakeDeps();
