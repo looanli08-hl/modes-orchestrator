@@ -77,3 +77,17 @@
 1. 把 console 资产包成 AionUi 扩展（webui staticAssets + apiRoutes + settingsTab 着陆），验证 aioncore 扩展加载链路
 2. backlog 照旧：model 字段透传、kimi 报错 exit 0 解析防御、N 路 compete、cascade
 3. console 状态持久化（重启即丢，目前可接受）
+
+## Day 1 续 4 — 三线并行：扩展封装 + 两个 backlog 清偿
+
+- [x] **modes-console 扩展**（`extension/modes-console/`）：薄壳 + 代理架构。无头实测真实 aioncore 2.2.2：扩展加载 ✓、settings tab 渲染 panel ✓、onActivate 幂等拉起 console server ✓。**发现上游坑：v2.2.2 不挂载 webui apiRoutes**（上游示例同样 404，详见 seams.md §6）→ 改为内嵌面板直连 127.0.0.1:4177
+- [x] **token 防护**：直连意味着任意网页本可 CSRF 驱动"能改代码能 merge 的 agent"→ consoleServer 加 loopback token（`.modes-console-token` 0600，server/activate 共享）+ CORS；子代理还多堵了一个洞：GET / 对非 loopback Origin 不注入 token，防恶意网页回读。+10 测试
+- [x] **kimi exit-0 报错防御**：输出开头 `error:` → failed（quota 检测优先级不变），4 参数化用例 + 反误伤用例
+- [x] **model 字段透传**：`spawn/modelResolution.ts`，kimi←config.toml default_model、qwen←.env OPENAI_MODEL，绝不抛异常（元数据不能搞挂运行）+ 进程内缓存。runTask/brainstorm 四处接线
+- 测试总数 127 全绿。console server 新版在 4177 跑着
+
+### 下一步（更新）
+
+1. 用户实测 AionUi 桌面端里的扩展面板（无头链路已全通，桌面端 iframe 渲染是最后一厘米）
+2. console 状态持久化（重启即丢）
+3. backlog：N 路 compete（锦标赛）、cascade 模式

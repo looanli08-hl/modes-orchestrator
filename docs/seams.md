@@ -57,3 +57,11 @@ v2.2.2 是**三层架构**：TS 壳（Electron / web-host+web-cli）→ **`aionc
 现成可借：aioncore cron 通道（备选）；RotatingApiClient（未来裸 API 评审端参考）；ITeamTaskItem 字段形状（命名参考）。
 
 **待验证风险**：若改用 aioncore 通道，先验证 WebUI 模式的 JWT/CSRF 握手成本（`web-cli/src/ensureAdminPassword.ts` 是唯一现成样板）和 `turn.completed.last_message.content` 是否承载完整最终文本（类型显示是）。
+
+## 6. 扩展机制实测（2026-09-13，modes-console 封装时踩出）
+
+- **加载链路可用**：`AIONUI_EXTENSIONS_PATH` 扫描目录 → `/api/extensions` 列出 → settings tab iframe 渲染扩展 HTML（`/api/extensions/{name}/assets/...`）→ onActivate spawn console server。全链无头实测通过
+- **大坑：aioncore v2.2.2 不挂载 `contributes.webui` 的 apiRoutes/staticAssets HTTP 路由**（上游 ext-feishu/ext-wecom-bot 原样复现同样 404，二进制里该功能 id 叫 `legacy-webui-routes`——疑似执行层缺失/门控）。上游 e2e 若真跑应也会红
+- lifecycle hook 是**直接 spawn 脚本文件**（需 shebang + chmod +x），**不传任何 context**（argv/env/stdin 全空），extensionDir 只能 `__dirname` 推；apiRoutes manifest 默认 method=GET
+- 扩展目录在 `"type":"module"` 包下必须自带 `{"type":"commonjs"}` 的 package.json
+- **绕行方案（已实现）**：内嵌面板跨域直连 console server（CORS + x-modes-token，token 文件共享，GET / 对非 loopback Origin 不注入 token）。代理路由代码保留，上游修好后即插即用
