@@ -103,3 +103,11 @@ bun run dev
 ```
 
 带两个变量重启后实测：aioncore 起在 51296、`/api/extensions` 列出 modes-console（enabled）、settings tab 注册、面板 HTML 里 `MODES_API_BASE`/`MODES_TOKEN` 注入齐全。
+
+## Day 1 续 5 — modes-eval 场景评测器（e2e 回归套件）
+
+- [x] `src/eval/`（scenarios + runEval，deps 注入）+ `scripts/modes-eval.ts`：5 个真实 CLI 场景（simple-create / modify-existing / impossible-task / review-disagree / brainstorm-basic），自动 pick（跟评审推荐 → 第一成功路 → neither）+ merge 验证，结果追加 `evals/eval-runs.jsonl`（gitignored）。15 单测
+- [x] **首次全量实跑 5/5 通过（~4.8 min）**；首跑 impossible-task 的 FAIL 是验证逻辑校准（空 diff merge = git no-op），非假期望
+- [x] **评测器首功**：抓到 runTask 评审失败分支缺 `pick` 字段（已修）
+- [x] 调研结论：promptfoo/deepeval 评的是模型输出质量，不认识编排协议语义（merge 落盘/JSONL 契约/gate 流转）——协议回归套件必须自建；模型质量评测未来可 leverage promptfoo
+- 观察：`review-disagree` 两轮 kimi 均稳定胜出 qwen —— 路由记忆数据开始积累
