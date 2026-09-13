@@ -3,6 +3,8 @@
  * Recorded fixture: tests/fixtures/kimi-success.{stdout,stderr} — a real
  * `kimi -p` run (2026-09-13). Asserts the fixed schema comes out and that
  * stderr session noise (resume hints, version banner) never enters the summary.
+ * Fixture kimi-exit0-error.stdout covers the kimi quirk where a CLI error is
+ * printed yet the process still exits 0.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -52,6 +54,31 @@ describe('parseWorkerOutput: CLI output → fixed schema (A2)', () => {
   it('quota pattern wins over exit code — even exit 0 with a quota line is quota_exhausted', () => {
     const result = parseWorkerOutput({ exitCode: 0, stdout: 'rate limit hit, stopped early', stderr: '' });
     expect(result.outcome).toBe('quota_exhausted');
+  });
+
+  it('real kimi exit-0 error sample: outcome failed, NOT success (kimi quirk defense)', async () => {
+    const stdout = await readFile(path.join(fixtures, 'kimi-exit0-error.stdout'), 'utf8');
+    const result = parseWorkerOutput({ exitCode: 0, stdout, stderr: '' });
+    expect(result.outcome).toBe('failed');
+    expect(result.summary).toContain('Cannot combine');
+  });
+
+  it.each([
+    { stdout: 'Error: something went wrong', stderr: '' },
+    { stdout: '', stderr: '  error: bad flag\n' },
+    { stdout: '\n\nERROR: crashed', stderr: '' },
+  ])('exit 0 with leading error line %j → failed (case-insensitive, leading whitespace ok)', ({ stdout, stderr }) => {
+    const result = parseWorkerOutput({ exitCode: 0, stdout, stderr });
+    expect(result.outcome).toBe('failed');
+  });
+
+  it('exit 0 with "error:" only mid-output → still success (only the output head counts)', () => {
+    const result = parseWorkerOutput({
+      exitCode: 0,
+      stdout: 'Fixed the bug.\nThe log line "error: x" no longer appears.',
+      stderr: '',
+    });
+    expect(result.outcome).toBe('success');
   });
 
   it.each(['qwen-auth-missing.stderr', 'iflow-auth-missing.stderr'])(

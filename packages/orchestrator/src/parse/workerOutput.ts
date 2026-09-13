@@ -32,6 +32,9 @@ const QUOTA_PATTERNS: RegExp[] = [
   /配额/,
 ];
 
+/** kimi quirk: CLI errors print `error: ...` yet the process still exits 0 */
+const LEADING_ERROR_PATTERN = /^\s*error:/i;
+
 export function parseWorkerOutput(raw: RawWorkerOutput): ParsedWorkerResult {
   const summary = raw.stdout.trim();
 
@@ -45,6 +48,10 @@ export function parseWorkerOutput(raw: RawWorkerOutput): ParsedWorkerResult {
   }
 
   if (raw.exitCode === 0) {
+    // Only the head of each stream counts — "error:" mid-output is normal prose.
+    if (LEADING_ERROR_PATTERN.test(raw.stdout) || LEADING_ERROR_PATTERN.test(raw.stderr)) {
+      return { outcome: 'failed', summary };
+    }
     return { outcome: 'success', summary };
   }
   return { outcome: 'failed', summary };
