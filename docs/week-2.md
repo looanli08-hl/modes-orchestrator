@@ -132,3 +132,10 @@ bun run dev
 - [x] modes-run --mode cascade（Merge? [y/N] gate）；eval 场景 cascade-basic
 - [x] **全量 eval 收官：7/7 通过**。cascade-basic 实证早停语义：qwen 一级 9s 成功，kimi 零调用零额度消耗
 - spec-mvp 模式表三模式（compete/brainstorm/cascade）全部从措辞变为实现
+
+## Day 2 — eval 场景库扩充（7 → 22，分层）
+
+- [x] tier 机制：core（7，提交前冒烟 ~5min）/ extended（15，`--all` 跑全量攒数据 ~25min）；显式指定 id 无视 tier
+- [x] 15 新场景：10 种 compete 任务类型（bug-fix/add-tests/refactor/docs/css/config/multi-file/error-handling/py-to-js/arg-parse）+ 3 brainstorm 题材 + four-lane + cascade-harder（新 expectWinner 断言：正常终止即可，不断言哪级赢）
+- [x] **全量真实跑 22/22 一次全绿**，零校准。观察：cascade-harder 也被 qwen 一级解决——升级路径要验需明显超出 qwen 能力的题；数据已入 eval-runs.jsonl
+- 测试总数 184 全绿
