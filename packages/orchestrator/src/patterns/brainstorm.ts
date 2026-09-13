@@ -13,6 +13,7 @@ import { makeRealDeps } from '../fanout/realDeps';
 import { parseWorkerOutput } from '../parse/workerOutput';
 import { EVENT_LOG_SCHEMA_VERSION, type EventLogOutcome } from '../schema/eventLog';
 import { buildWorkerArgs } from '../spawn/cliAdapters';
+import { resolveModelId } from '../spawn/modelResolution';
 import { appendEvent } from '../store/eventLogStore';
 
 export interface BrainstormLane {
@@ -67,7 +68,7 @@ export async function runBrainstorm(options: BrainstormOptions): Promise<Brainst
           lane,
           attempt_id: `${taskId}-${lane}-1`,
           task_type: options.taskType ?? 'brainstorm',
-          model: 'unknown',
+          model: resolveModelId(cli),
           provider: cli,
           role: 'worker',
           outcome: parsed.outcome,
@@ -111,7 +112,7 @@ ${survivors.map((l) => `=== ANSWER ${l.lane} ===\n${l.answer}`).join('\n\n')}
         lane: 'synthesis',
         attempt_id: `${taskId}-synthesis-1`,
         task_type: options.taskType ?? 'brainstorm',
-        model: 'unknown',
+        model: resolveModelId(synthesizerCli),
         provider: synthesizerCli,
         role: 'synthesizer',
         outcome: parsed.outcome,

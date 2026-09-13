@@ -15,6 +15,7 @@ import { createTaskLifecycle, type TaskState } from '../gate/userGate';
 import { parseWorkerOutput } from '../parse/workerOutput';
 import { buildReviewPrompt, parseReviewVerdict, type ReviewVerdict } from '../review/crossReview';
 import { buildWorkerArgs } from '../spawn/cliAdapters';
+import { resolveModelId } from '../spawn/modelResolution';
 import { EVENT_LOG_SCHEMA_VERSION, type EventLogOutcome } from '../schema/eventLog';
 import { createResultStore } from '../settlement/settleResult';
 import { appendEvent } from '../store/eventLogStore';
@@ -71,14 +72,15 @@ export async function runTask(options: RunTaskOptions): Promise<RunTaskResult> {
     const worktreePath = path.join(options.repoPath, '.modes-worktrees', `${taskId}-${laneResult.lane}`);
     const diff = diffs[i];
 
+    const cli = options.lanes.find((l) => l.lane === laneResult.lane)?.cli ?? 'unknown';
     const record = {
       task_id: taskId,
       lane: laneResult.lane,
       attempt_id: `${taskId}-${laneResult.lane}-1`,
       attempt_seq: 1,
       outcome: parsed.outcome,
-      model: 'unknown',
-      provider: options.lanes.find((l) => l.lane === laneResult.lane)?.cli ?? 'unknown',
+      model: resolveModelId(cli),
+      provider: cli,
       latency: laneResult.latency,
       ts: new Date().toISOString(),
     };
@@ -134,7 +136,7 @@ export async function runTask(options: RunTaskOptions): Promise<RunTaskResult> {
       lane: 'review',
       attempt_id: `${taskId}-review-1`,
       task_type: options.taskType ?? 'unknown',
-      model: 'unknown',
+      model: resolveModelId(reviewerCli),
       provider: reviewerCli,
       role: 'reviewer',
       outcome: parsed.outcome,
