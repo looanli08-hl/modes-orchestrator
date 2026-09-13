@@ -63,3 +63,17 @@
 - [x] `patterns/brainstorm`：N 路并行回答（**无 worktree 无合并**——思考型任务不碰 git）→ 一路综合多样性；单路失败降级照跑，全失败跳过综合不伪造（3 集成测试）
 - [x] `modes-run --mode brainstorm` 接线
 - [x] 真实双路验证（"付费主题商店能成吗"）：综合器保留了双路多样性、裁决了 lane B 的内部矛盾、升级了结论。**观察到的毛病**：kimi 综合器自作主张在 workDir 写了一个分析文档——brainstorm 语义上是纯思考，lane 该不该禁写文件，留作设计问题（候选：prompt 里声明 / 跑在隔离 scratch 目录）
+
+## Day 1 续 3 — brainstorm 物理隔离 + modes console（产品化第一步）
+
+- [x] **brainstorm lane 物理隔离**：lane/综合器 cwd 改为 `mkdtemp` scratch 目录（结束即删），流氓写文件不再污染 workDir（新增测试：rogue lane 写文件只落 scratch）。真实复跑（苹果发布会总结）：workDir 仅余 `.modes/`，综合器正确裁定"lane B 前提过时"冲突
+- [x] **扩展机制摸底**（explore 结论）：AionUi 扩展加载器在闭源 aioncore 里；`contributes.webui`（apiRoutes + staticAssets）= 万能后门，settings tab iframe 同源可 fetch 自有 apiRoutes——**不用碰 packages/desktop 就能嵌面板**。卡点：入口只能在设置页深处、无 WS 只能轮询
+- [x] **modes console**：`src/server/consoleServer.ts`（node:http，deps 注入）+ `taskRegistry.ts`（running → awaiting_pick/done/failed）+ `panel/index.html`（单文件面板）+ `scripts/modes-console.ts`（`bun packages/orchestrator/scripts/modes-console.ts`，默认 4177）。16 测试；同套资产未来可原样搬进扩展的 webui 贡献
+- [x] **真实端到端（HTTP API 驱动）**：POST compete（写秋天诗）→ 双路成功 → 评审 agreed + 推荐 A（理由细致到"B 第二句'日渐长'与秋天矛盾且与自己的摘要自相矛盾、末句重字、缺尾换行"）→ POST pick A → 合并落盘，git log 留痕，状态 done
+- 设计取舍：console id 与引擎 taskId 双轨（引擎 id 跑完才有）；pick 失败不回终态留人工解冲突；worktreePath/branch/eventsFile 不下发前端
+
+### 下一步（更新）
+
+1. 把 console 资产包成 AionUi 扩展（webui staticAssets + apiRoutes + settingsTab 着陆），验证 aioncore 扩展加载链路
+2. backlog 照旧：model 字段透传、kimi 报错 exit 0 解析防御、N 路 compete、cascade
+3. console 状态持久化（重启即丢，目前可接受）
