@@ -4,9 +4,10 @@
  * Usage:  bun packages/orchestrator/scripts/modes-console.ts
  *         PORT=4180 bun ...   (default port 4177)
  * Then open the printed URL. Lanes are fixed to kimi + qwen with kimi as
- * reviewer/synthesizer, same as modes-run.ts. State is in-memory only —
- * restarting the console forgets every task (the JSONL event log on disk
- * remains the durable record).
+ * reviewer/synthesizer, same as modes-run.ts. Task history is persisted to
+ * packages/orchestrator/.modes-console-tasks.json (gitignored) and reloaded on
+ * start; tasks caught mid-run by a restart are marked failed. The JSONL event
+ * log on disk remains the durable record of the runs themselves.
  *
  * The API is gated by a bearer token shared with the AionUi extension via
  * packages/orchestrator/.modes-console-token (created on first run, 0600).
@@ -14,6 +15,8 @@
 
 import { createConsoleServer } from '../src/server/consoleServer';
 import { ensureConsoleToken } from '../src/server/consoleToken';
+import { createFilePersistence } from '../src/server/filePersistence';
+import { createTaskRegistry } from '../src/server/taskRegistry';
 import { mergeLane } from '../src/gate/mergeLane';
 import { recordUserPick } from '../src/gate/recordUserPick';
 import { runBrainstorm } from '../src/patterns/brainstorm';
@@ -21,6 +24,9 @@ import { runTask } from '../src/run/runTask';
 
 const port = Number(process.env.PORT ?? 4177);
 const token = ensureConsoleToken();
+
+const registry = createTaskRegistry({ persistence: createFilePersistence() });
+await registry.init();
 
 const LANES = [
   { lane: 'A', cli: 'kimi' },
@@ -34,7 +40,7 @@ const server = createConsoleServer({
     runBrainstorm({ prompt, lanes: LANES, synthesizerCli: 'kimi', workDir }),
   recordPick: (eventsFile, opts) => recordUserPick(eventsFile, opts),
   mergeLane: (opts) => mergeLane(opts),
-});
+}, { registry });
 
 server.listen(port, '127.0.0.1', () => {
   console.log(`modes console listening at http://127.0.0.1:${port}`);

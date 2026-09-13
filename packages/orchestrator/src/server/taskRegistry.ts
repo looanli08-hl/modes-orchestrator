@@ -3,8 +3,14 @@
  * stateless (its truth is the JSONL event log); this registry only mirrors enough
  * for the panel to render: status machine running → awaiting_pick | done | failed,
  * the lane results, and the pick-time pointers (eventsFile / worktree / branch)
- * needed to apply a human pick later. Nothing here is persisted — a server
- * restart forgets every task, by design for a local dev console.
+ * needed to apply a human pick later.
+ *
+ * Persistence is optional and injected (deps.persistence): when present, the
+ * registry saves the full task records after every state change and loads them
+ * back on init(), so a server restart keeps task history and still-undable
+ * awaiting_pick tasks pickable. Tasks caught in 'running' at load time are
+ * zombies (the process died, so the lanes are gone) and are marked failed.
+ * History is pruned to the newest MAX_TASKS records by createdAt.
  */
 
 import type { UserPick } from '../gate/userGate';
@@ -53,6 +59,8 @@ export interface ConsoleTaskSummary {
 }
 
 export interface TaskRegistry {
+  /** load persisted state (no-op without persistence); call once before serving */
+  init(): Promise<void>;
   create(mode: ConsoleTaskMode, prompt: string, repoPath: string): ConsoleTask;
   get(id: string): ConsoleTask | undefined;
   list(): ConsoleTaskSummary[];
@@ -72,9 +80,55 @@ export interface TaskRegistry {
   setError(id: string, error: unknown): void;
 }
 
-export function createTaskRegistry(): TaskRegistry {
+/**
+ * Durable store for console tasks. save() receives the full ConsoleTask records
+ * (lanes/review/synthesis plus pick-time pointers — everything a restart needs
+ * to render history and to still apply a pick); load() returns what a previous
+ * save() wrote, or an empty array when there is nothing readable.
+ */
+export interface TaskPersistence {
+  save(tasks: unknown[]): Promise<void>;
+  load(): Promise<unknown[]>;
+}
+
+export interface TaskRegistryDeps {
+  persistence?: TaskPersistence;
+}
+
+/** history is capped so the persistence file cannot grow without bound */
+const MAX_TASKS = 100;
+
+/** minimal shape check — the file is ours, but a hand-edited record should not crash the console */
+function isConsoleTask(value: unknown): value is ConsoleTask {
+  if (typeof value !== 'object' || value === null) return false;
+  const t = value as Record<string, unknown>;
+  return (
+    typeof t.id === 'string' &&
+    (t.status === 'running' || t.status === 'awaiting_pick' || t.status === 'done' || t.status === 'failed')
+  );
+}
+
+export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
   const tasks = new Map<string, ConsoleTask>();
+  const persistence = deps.persistence;
   let seq = 0;
+  // saves are serialized: a slow/failed write must never interleave with or block the next one
+  let saveQueue: Promise<void> = Promise.resolve();
+
+  const persist = (): void => {
+    if (!persistence) return;
+    const snapshot = [...tasks.values()].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
+    saveQueue = saveQueue.then(() => persistence.save(snapshot)).catch((err) => console.error('task save failed:', err));
+  };
+
+  /** drop the oldest tasks beyond MAX_TASKS, then save */
+  const changed = (): void => {
+    if (tasks.size > MAX_TASKS) {
+      const ordered = [...tasks.values()].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
+      for (const task of ordered.slice(0, ordered.length - MAX_TASKS)) tasks.delete(task.id);
+    }
+    persist();
+  };
 
   const requireTask = (id: string): ConsoleTask => {
     const task = tasks.get(id);
@@ -83,6 +137,27 @@ export function createTaskRegistry(): TaskRegistry {
   };
 
   return {
+    async init() {
+      if (!persistence) return;
+      let loaded: unknown[];
+      try {
+        loaded = await persistence.load();
+      } catch {
+        return; // unreadable store — start with empty history rather than crash
+      }
+      let restored = 0;
+      for (const raw of loaded) {
+        if (!isConsoleTask(raw)) continue;
+        if (raw.status === 'running') {
+          // the process died mid-run — the lanes are gone, so it can never finish
+          raw.status = 'failed';
+          raw.error = 'server restarted while task was running';
+        }
+        tasks.set(raw.id, raw);
+        restored += 1;
+      }
+      if (restored > 0) changed(); // persist zombie fixes and pruning
+    },
     create(mode, prompt, repoPath) {
       seq += 1;
       const task: ConsoleTask = {
@@ -99,6 +174,7 @@ export function createTaskRegistry(): TaskRegistry {
         brainstorm: null,
       };
       tasks.set(task.id, task);
+      changed();
       return task;
     },
 
@@ -116,6 +192,7 @@ export function createTaskRegistry(): TaskRegistry {
       task.compete = { lanes: result.lanes, review: result.review };
       // runTask always lands in awaiting_user_pick — the gate can only be resolved by a human pick
       task.status = 'awaiting_pick';
+      changed();
     },
 
     completeBrainstorm(id, result) {
@@ -124,23 +201,27 @@ export function createTaskRegistry(): TaskRegistry {
       task.eventsFile = result.eventsFile;
       task.brainstorm = { lanes: result.lanes, synthesis: result.synthesis };
       task.status = 'done';
+      changed();
     },
 
     fail(id, error) {
       const task = requireTask(id);
       task.status = 'failed';
       task.error = error instanceof Error ? error.message : String(error);
+      changed();
     },
 
     markDone(id) {
       const task = requireTask(id);
       task.status = 'done';
       task.error = null;
+      changed();
     },
 
     setError(id, error) {
       const task = requireTask(id);
       task.error = error instanceof Error ? error.message : String(error);
+      changed();
     },
   };
 }
