@@ -35,6 +35,9 @@ const QUOTA_PATTERNS: RegExp[] = [
 /** kimi quirk: CLI errors print `error: ...` yet the process still exits 0 */
 const LEADING_ERROR_PATTERN = /^\s*error:/i;
 
+/** below this length an exit-0 quota message is an apology, not a deliverable */
+const SHORT_QUOTA_ONLY_MAX_CHARS = 300;
+
 export function parseWorkerOutput(raw: RawWorkerOutput): ParsedWorkerResult {
   const summary = raw.stdout.trim();
 
@@ -43,16 +46,24 @@ export function parseWorkerOutput(raw: RawWorkerOutput): ParsedWorkerResult {
   }
 
   const haystack = `${raw.stdout}\n${raw.stderr}`;
-  if (QUOTA_PATTERNS.some((p) => p.test(haystack))) {
-    return { outcome: 'quota_exhausted', summary };
-  }
 
   if (raw.exitCode === 0) {
     // Only the head of each stream counts — "error:" mid-output is normal prose.
     if (LEADING_ERROR_PATTERN.test(raw.stdout) || LEADING_ERROR_PATTERN.test(raw.stderr)) {
       return { outcome: 'failed', summary };
     }
+    // Exit 0 + quota signature: only believe it when the whole output is a short
+    // apology with no deliverable. Substantial output means work happened and the
+    // quota mention is topical (three-lane eval: "write a rate limiter" was
+    // misjudged as quota_exhausted while the lane had succeeded).
+    if (QUOTA_PATTERNS.some((p) => p.test(haystack)) && summary.length < SHORT_QUOTA_ONLY_MAX_CHARS) {
+      return { outcome: 'quota_exhausted', summary };
+    }
     return { outcome: 'success', summary };
+  }
+
+  if (QUOTA_PATTERNS.some((p) => p.test(haystack))) {
+    return { outcome: 'quota_exhausted', summary };
   }
   return { outcome: 'failed', summary };
 }

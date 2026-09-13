@@ -81,6 +81,17 @@ describe('parseWorkerOutput: CLI output → fixed schema (A2)', () => {
     expect(result.outcome).toBe('success');
   });
 
+  it('exit 0 with substantial work output that merely mentions rate limiting → success (three-lane false positive)', () => {
+    const result = parseWorkerOutput({
+      exitCode: 0,
+      stdout:
+        'Implemented a rate limiter in limiter.js.\n\n' +
+        'The module exposes a sliding-window rate limiter with configurable capacity. '.repeat(8),
+      stderr: '',
+    });
+    expect(result.outcome).toBe('success');
+  });
+
   it.each(['qwen-auth-missing.stderr', 'iflow-auth-missing.stderr'])(
     'real auth-missing output %s → failed, NOT quota_exhausted (auth failure ≠ quota)',
     async (fixture) => {
