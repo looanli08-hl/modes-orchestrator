@@ -123,6 +123,7 @@
       <div class="mode-toggle">
         <button type="button" id="mode-compete" class="active">compete</button>
         <button type="button" id="mode-brainstorm">brainstorm</button>
+        <button type="button" id="mode-cascade">cascade</button>
       </div>
       <textarea id="prompt" placeholder="Describe the task…" required></textarea>
       <input type="text" id="repo-path" placeholder="Repo path (must be a git repo); empty = cwd of the console" />
@@ -234,13 +235,17 @@ function renderDetail(task) {
     html += `<p class="muted" style="margin-top:24px">Running — lanes are working…</p>`;
   } else if (task.mode === "compete") {
     html += renderCompete(task);
+  } else if (task.mode === "cascade") {
+    html += renderCascade(task);
   } else {
     html += renderBrainstorm(task);
   }
   detail.innerHTML = html;
 
   if (task.status === "awaiting_pick") {
-    const picks = [...(task.lanes || []).map((l) => l.lane), "neither"];
+    const picks = task.mode === "cascade"
+      ? [`cascade-${task.winner.level}`, "neither"]
+      : [...(task.lanes || []).map((l) => l.lane), "neither"];
     for (const pick of picks) {
       $(`pick-${pick}`).addEventListener("click", () => applyPick(task.id, pick));
     }
@@ -275,6 +280,36 @@ function renderCompete(task) {
       <span class="muted">merges the picked lane into the current branch</span>
     </div>`;
   } else if (task.status === "done") {
+    html += `<p class="muted" style="margin-top:16px">Pick recorded — task done.</p>`;
+  }
+  return html;
+}
+
+function renderCascade(task) {
+  let html = `<div class="lanes single">` + (task.attempts || []).map((a) => `
+    <div class="lane-card">
+      <header><h3>Level ${esc(a.level)} · ${esc(a.cli)}</h3>${outcomeBadge(a.outcome)}</header>
+      <div class="body"><p class="muted">${(a.latency / 1000).toFixed(1)}s</p></div>
+    </div>`).join("") + `</div>`;
+  if (task.winner) {
+    html += `<div class="lanes single"><div class="lane-card">
+      <header><h3>Winner — level ${esc(task.winner.level)} (${esc(task.winner.cli)})</h3></header>
+      <div class="body">
+        <p>${esc(task.winner.summary || "(no summary)")}</p>
+        ${task.winner.diff ? `<pre>${esc(task.winner.diff)}</pre>` : `<p class="muted">(no changes)</p>`}
+      </div>
+    </div></div>`;
+  } else {
+    html += `<div class="banner"><span class="verdict">chain exhausted — no output</span>
+      <div class="muted">every level failed or produced nothing; there is no winner to merge.</div></div>`;
+  }
+  if (task.status === "awaiting_pick") {
+    html += `<div class="pick-bar">
+      <button id="pick-cascade-${esc(task.winner.level)}">Merge cascade-${esc(task.winner.level)}</button>
+      <button id="pick-neither">Neither</button>
+      <span class="muted">merges the winning level into the current branch</span>
+    </div>`;
+  } else if (task.status === "done" && task.winner) {
     html += `<p class="muted" style="margin-top:16px">Pick recorded — task done.</p>`;
   }
   return html;
@@ -315,11 +350,14 @@ function setMode(mode) {
   state.mode = mode;
   $("mode-compete").classList.toggle("active", mode === "compete");
   $("mode-brainstorm").classList.toggle("active", mode === "brainstorm");
-  $("repo-path").style.display = mode === "compete" ? "" : "none";
+  $("mode-cascade").classList.toggle("active", mode === "cascade");
+  // brainstorm needs no git repo; compete and cascade both run in worktrees of one
+  $("repo-path").style.display = mode === "brainstorm" ? "none" : "";
 }
 
 $("mode-compete").addEventListener("click", () => setMode("compete"));
 $("mode-brainstorm").addEventListener("click", () => setMode("brainstorm"));
+$("mode-cascade").addEventListener("click", () => setMode("cascade"));
 
 $("run-form").addEventListener("submit", async (e) => {
   e.preventDefault();

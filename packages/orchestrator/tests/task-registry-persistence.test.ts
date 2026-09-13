@@ -28,6 +28,7 @@ function makeTask(overrides: Partial<ConsoleTask> = {}): ConsoleTask {
     eventsFile: '/tmp/events.jsonl',
     compete: null,
     brainstorm: null,
+    cascade: null,
     ...overrides,
   };
 }

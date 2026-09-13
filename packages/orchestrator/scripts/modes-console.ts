@@ -4,7 +4,8 @@
  * Usage:  bun packages/orchestrator/scripts/modes-console.ts
  *         PORT=4180 bun ...   (default port 4177)
  * Then open the printed URL. Lanes are fixed to kimi + qwen with kimi as
- * reviewer/synthesizer, same as modes-run.ts. Task history is persisted to
+ * reviewer/synthesizer, same as modes-run.ts; the cascade chain defaults to
+ * qwen → kimi (cheap first), overridable per request. Task history is persisted to
  * packages/orchestrator/.modes-console-tasks.json (gitignored) and reloaded on
  * start; tasks caught mid-run by a restart are marked failed. The JSONL event
  * log on disk remains the durable record of the runs themselves.
@@ -20,6 +21,7 @@ import { createTaskRegistry } from '../src/server/taskRegistry';
 import { mergeLane } from '../src/gate/mergeLane';
 import { recordUserPick } from '../src/gate/recordUserPick';
 import { runBrainstorm } from '../src/patterns/brainstorm';
+import { runCascade } from '../src/patterns/cascade';
 import { runTask } from '../src/run/runTask';
 
 const port = Number(process.env.PORT ?? 4177);
@@ -38,6 +40,8 @@ const server = createConsoleServer({
   runCompete: ({ repoPath, prompt }) => runTask({ repoPath, prompt, lanes: LANES, reviewerCli: 'kimi' }),
   runBrainstormTask: ({ workDir, prompt }) =>
     runBrainstorm({ prompt, lanes: LANES, synthesizerCli: 'kimi', workDir }),
+  // the server applies the default chain (qwen → kimi) when the request omits one
+  runCascadeTask: ({ repoPath, prompt, chain }) => runCascade({ repoPath, prompt, chain }),
   recordPick: (eventsFile, opts) => recordUserPick(eventsFile, opts),
   mergeLane: (opts) => mergeLane(opts),
 }, { registry });

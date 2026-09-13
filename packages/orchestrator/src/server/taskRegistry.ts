@@ -16,7 +16,7 @@
 import type { UserPick } from '../gate/userGate';
 import type { ReviewVerdict } from '../review/crossReview';
 
-export type ConsoleTaskMode = 'compete' | 'brainstorm';
+export type ConsoleTaskMode = 'compete' | 'brainstorm' | 'cascade';
 export type ConsoleTaskStatus = 'running' | 'awaiting_pick' | 'done' | 'failed';
 
 export interface CompeteLaneState {
@@ -34,6 +34,22 @@ export interface BrainstormLaneState {
   answer: string;
 }
 
+export interface CascadeAttemptState {
+  level: number;
+  cli: string;
+  outcome: string;
+  latency: number;
+}
+
+export interface CascadeWinnerState {
+  level: number;
+  cli: string;
+  summary: string;
+  diff: string;
+  worktreePath: string;
+  branch: string;
+}
+
 export interface ConsoleTask {
   /** console-assigned id — the engine only hands back its taskId when the run finishes */
   id: string;
@@ -48,6 +64,7 @@ export interface ConsoleTask {
   eventsFile: string | null;
   compete: { lanes: CompeteLaneState[]; review: ReviewVerdict | null } | null;
   brainstorm: { lanes: BrainstormLaneState[]; synthesis: string | null } | null;
+  cascade: { attempts: CascadeAttemptState[]; winner: CascadeWinnerState | null } | null;
 }
 
 export interface ConsoleTaskSummary {
@@ -71,6 +88,10 @@ export interface TaskRegistry {
   completeBrainstorm(
     id: string,
     result: { taskId: string; lanes: BrainstormLaneState[]; synthesis: string | null; eventsFile: string }
+  ): void;
+  completeCascade(
+    id: string,
+    result: { taskId: string; attempts: CascadeAttemptState[]; winner: CascadeWinnerState | null; eventsFile: string }
   ): void;
   /** engine threw — terminal state with the message surfaced to the panel */
   fail(id: string, error: unknown): void;
@@ -172,6 +193,7 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
         eventsFile: null,
         compete: null,
         brainstorm: null,
+        cascade: null,
       };
       tasks.set(task.id, task);
       changed();
@@ -201,6 +223,17 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
       task.eventsFile = result.eventsFile;
       task.brainstorm = { lanes: result.lanes, synthesis: result.synthesis };
       task.status = 'done';
+      changed();
+    },
+
+    completeCascade(id, result) {
+      const task = requireTask(id);
+      task.engineTaskId = result.taskId;
+      task.eventsFile = result.eventsFile;
+      task.cascade = { attempts: result.attempts, winner: result.winner };
+      // a winner leaves the merge decision to the human; an exhausted chain is
+      // terminal on its own — the failure is presented honestly, never fabricated
+      task.status = result.winner ? 'awaiting_pick' : 'done';
       changed();
     },
 

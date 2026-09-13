@@ -18,11 +18,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { UserPick } from '../gate/userGate';
+import type { CascadeLevel } from '../patterns/cascade';
 import type { ReviewVerdict } from '../review/crossReview';
 import {
   createTaskRegistry,
   isUserPick,
   type BrainstormLaneState,
+  type CascadeAttemptState,
+  type CascadeWinnerState,
   type CompeteLaneState,
   type ConsoleTask,
   type TaskRegistry,
@@ -43,6 +46,13 @@ export interface BrainstormEngineResult {
   eventsFile: string;
 }
 
+export interface CascadeEngineResult {
+  taskId: string;
+  attempts: CascadeAttemptState[];
+  winner: CascadeWinnerState | null;
+  eventsFile: string;
+}
+
 export interface ConsoleDeps {
   /**
    * Bearer token gating /api/* (header: x-modes-token). When set, every API
@@ -53,6 +63,7 @@ export interface ConsoleDeps {
   token?: string;
   runCompete(options: { repoPath: string; prompt: string }): Promise<CompeteEngineResult>;
   runBrainstormTask(options: { workDir: string; prompt: string }): Promise<BrainstormEngineResult>;
+  runCascadeTask(options: { repoPath: string; prompt: string; chain: CascadeLevel[] }): Promise<CascadeEngineResult>;
   recordPick(
     eventsFile: string,
     options: { taskId: string; pick: UserPick; reviewVerdict: ReviewVerdict['verdict'] | null }
@@ -69,6 +80,24 @@ export interface ConsoleServerOptions {
 
 const BODY_LIMIT_BYTES = 1024 * 1024;
 const PANEL_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../panel/index.html');
+
+/** cheapest first — same default as modes-run.ts --mode cascade */
+const DEFAULT_CASCADE_CHAIN: CascadeLevel[] = [{ cli: 'qwen' }, { cli: 'kimi' }];
+
+/** a request-body chain override must be a non-empty list of {cli, timeoutMs?} entries */
+function isCascadeChain(value: unknown): value is CascadeLevel[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (entry) =>
+        typeof entry === 'object' &&
+        entry !== null &&
+        typeof (entry as CascadeLevel).cli === 'string' &&
+        ((entry as CascadeLevel).timeoutMs === undefined || typeof (entry as CascadeLevel).timeoutMs === 'number')
+    )
+  );
+}
 
 // Anchor inside panel/index.html before which the token is injected when the
 // panel is served. Shared convention with the AionUi extension's activate.js
@@ -136,6 +165,14 @@ function taskDetailView(task: ConsoleTask): Record<string, unknown> {
       review: task.compete?.review ?? null,
     };
   }
+  if (task.mode === 'cascade') {
+    const winner = task.cascade?.winner;
+    return {
+      ...base,
+      attempts: task.cascade?.attempts ?? [],
+      winner: winner ? { level: winner.level, cli: winner.cli, summary: winner.summary, diff: winner.diff } : null,
+    };
+  }
   return {
     ...base,
     lanes: task.brainstorm?.lanes ?? [],
@@ -147,13 +184,17 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
   const registry = options.registry ?? createTaskRegistry();
   const panelPath = options.panelPath ?? PANEL_PATH;
 
-  const runTaskInBackground = (task: ConsoleTask): void => {
+  const runTaskInBackground = (task: ConsoleTask, chain?: CascadeLevel[]): void => {
     const run =
       task.mode === 'compete'
         ? deps.runCompete({ repoPath: task.repoPath, prompt: task.prompt }).then((r) => registry.completeCompete(task.id, r))
-        : deps
-            .runBrainstormTask({ workDir: task.repoPath, prompt: task.prompt })
-            .then((r) => registry.completeBrainstorm(task.id, r));
+        : task.mode === 'cascade'
+          ? deps
+              .runCascadeTask({ repoPath: task.repoPath, prompt: task.prompt, chain: chain ?? DEFAULT_CASCADE_CHAIN })
+              .then((r) => registry.completeCascade(task.id, r))
+          : deps
+              .runBrainstormTask({ workDir: task.repoPath, prompt: task.prompt })
+              .then((r) => registry.completeBrainstorm(task.id, r));
     run.catch((err) => registry.fail(task.id, err));
   };
 
@@ -164,9 +205,9 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     } catch {
       return sendJson(res, 400, { error: 'invalid JSON body' });
     }
-    const { mode, prompt, repoPath } = (body ?? {}) as Record<string, unknown>;
-    if (mode !== 'compete' && mode !== 'brainstorm') {
-      return sendJson(res, 400, { error: "mode must be 'compete' or 'brainstorm'" });
+    const { mode, prompt, repoPath, chain } = (body ?? {}) as Record<string, unknown>;
+    if (mode !== 'compete' && mode !== 'brainstorm' && mode !== 'cascade') {
+      return sendJson(res, 400, { error: "mode must be 'compete', 'brainstorm' or 'cascade'" });
     }
     if (typeof prompt !== 'string' || !prompt.trim()) {
       return sendJson(res, 400, { error: 'prompt must be a non-empty string' });
@@ -174,9 +215,12 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     if (repoPath !== undefined && typeof repoPath !== 'string') {
       return sendJson(res, 400, { error: 'repoPath must be a string' });
     }
+    if (chain !== undefined && !isCascadeChain(chain)) {
+      return sendJson(res, 400, { error: 'chain must be a non-empty array of { cli: string, timeoutMs?: number }' });
+    }
     // like modes-run.ts: no repoPath means "the directory the console was started from"
     const task = registry.create(mode, prompt, path.resolve(repoPath ?? process.cwd()));
-    runTaskInBackground(task);
+    runTaskInBackground(task, chain);
     sendJson(res, 201, { id: task.id });
   };
 
@@ -191,30 +235,49 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
       return sendJson(res, 400, { error: 'invalid JSON body' });
     }
     const { pick } = (body ?? {}) as Record<string, unknown>;
-    if (task.mode !== 'compete' || task.status !== 'awaiting_pick' || !task.compete || !task.eventsFile || !task.engineTaskId) {
+    if (task.status !== 'awaiting_pick' || !task.eventsFile || !task.engineTaskId) {
       return sendJson(res, 409, { error: `task ${taskId} is not awaiting a pick (status: ${task.status})` });
     }
-    // validated against this task's lanes, not a hardcoded A/B — compete is N-lane
-    const laneLetters = task.compete.lanes.map((l) => l.lane);
-    if (!isUserPick(pick, laneLetters)) {
-      return sendJson(res, 400, { error: `pick must be one of ${[...laneLetters, 'neither'].join(', ')}` });
+
+    // valid picks and the merge target are per-mode: compete is N-lane (validated
+    // against this task's lanes, not a hardcoded A/B); cascade has exactly one
+    // winner ("cascade-N") or "neither"
+    let reviewVerdict: ReviewVerdict['verdict'] | null = null;
+    let mergeTarget: { worktreePath: string; branch: string } | null = null;
+    if (task.mode === 'compete' && task.compete) {
+      const laneLetters = task.compete.lanes.map((l) => l.lane);
+      if (!isUserPick(pick, laneLetters)) {
+        return sendJson(res, 400, { error: `pick must be one of ${[...laneLetters, 'neither'].join(', ')}` });
+      }
+      reviewVerdict = task.compete.review?.verdict ?? null;
+      if (pick !== 'neither') {
+        const lane = task.compete.lanes.find((l) => l.lane === pick);
+        if (!lane) throw new Error(`lane ${pick} not found`);
+        mergeTarget = lane;
+      }
+    } else if (task.mode === 'cascade' && task.cascade?.winner) {
+      const winnerPick = `cascade-${task.cascade.winner.level}`;
+      if (!isUserPick(pick, [winnerPick])) {
+        return sendJson(res, 400, { error: `pick must be one of ${winnerPick}, neither` });
+      }
+      if (pick !== 'neither') mergeTarget = task.cascade.winner;
+    } else {
+      return sendJson(res, 409, { error: `task ${taskId} is not awaiting a pick (status: ${task.status})` });
     }
 
     try {
       await deps.recordPick(task.eventsFile, {
         taskId: task.engineTaskId,
         pick,
-        reviewVerdict: task.compete.review?.verdict ?? null,
+        reviewVerdict,
       });
       // mergeLane only ever runs on an explicit human pick; "neither" keeps the
       // worktrees on disk for inspection, same as modes-run.ts
-      if (pick !== 'neither') {
-        const lane = task.compete.lanes.find((l) => l.lane === pick);
-        if (!lane) throw new Error(`lane ${pick} not found`);
+      if (mergeTarget) {
         await deps.mergeLane({
           repoPath: task.repoPath,
-          worktreePath: lane.worktreePath,
-          branch: lane.branch,
+          worktreePath: mergeTarget.worktreePath,
+          branch: mergeTarget.branch,
           taskId: task.engineTaskId,
           pick,
         });

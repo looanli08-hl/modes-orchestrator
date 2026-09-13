@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createConsoleServer,
   type BrainstormEngineResult,
+  type CascadeEngineResult,
   type CompeteEngineResult,
   type ConsoleDeps,
 } from '../src/server/consoleServer';
@@ -62,16 +63,44 @@ function makeBrainstormResult(): BrainstormEngineResult {
   };
 }
 
+/**
+ * winnerLevel: which chain level won (1-based), or null for an exhausted chain.
+ * Attempts are shaped consistently: levels before the winner failed, levels
+ * after it never ran.
+ */
+function makeCascadeResult(winnerLevel: number | null = 1): CascadeEngineResult {
+  const attempts = [
+    { level: 1, cli: 'qwen', outcome: winnerLevel === 1 ? 'success' : 'failed', latency: 1200 },
+    ...(winnerLevel === 1
+      ? []
+      : [{ level: 2, cli: 'kimi', outcome: winnerLevel === 2 ? 'success' : 'failed', latency: 3400 }]),
+  ];
+  const winner =
+    winnerLevel === null
+      ? null
+      : {
+          level: winnerLevel,
+          cli: winnerLevel === 1 ? 'qwen' : 'kimi',
+          summary: `summary L${winnerLevel}`,
+          diff: `diff L${winnerLevel}`,
+          worktreePath: `/wt/cascade-${winnerLevel}`,
+          branch: `modes/t-cascade-${winnerLevel}`,
+        };
+  return { taskId: 'task-eng-3', attempts, winner, eventsFile: '/tmp/events.jsonl' };
+}
+
 function makeFakeDeps() {
   const compete = deferred<CompeteEngineResult>();
   const brainstorm = deferred<BrainstormEngineResult>();
+  const cascade = deferred<CascadeEngineResult>();
   const deps: ConsoleDeps = {
     runCompete: vi.fn(() => compete.promise),
     runBrainstormTask: vi.fn(() => brainstorm.promise),
+    runCascadeTask: vi.fn(() => cascade.promise),
     recordPick: vi.fn(async () => {}),
     mergeLane: vi.fn(async () => {}),
   };
-  return { deps, compete, brainstorm };
+  return { deps, compete, brainstorm, cascade };
 }
 
 const servers: Server[] = [];
@@ -424,6 +453,141 @@ describe('brainstorm flow', () => {
 
     const pickRes = await postJson(baseUrl, `/api/tasks/${id}/pick`, { pick: 'A' });
     expect(pickRes.status).toBe(409);
+  });
+});
+
+describe('cascade flow', () => {
+  async function createCascadeTask(baseUrl: string, body: Record<string, unknown> = {}): Promise<string> {
+    const res = await postJson(baseUrl, '/api/tasks', { mode: 'cascade', prompt: 'cheap first', repoPath: '/repo', ...body });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  it('runs running → awaiting_pick and exposes attempts + winner, hiding pick-time pointers', async () => {
+    const { deps, cascade } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+
+    const id = await createCascadeTask(baseUrl);
+    expect((await getTask(baseUrl, id)).status).toBe('running');
+    // no chain in the request → the server supplies the modes-run default, cheapest first
+    expect(deps.runCascadeTask).toHaveBeenCalledWith({
+      repoPath: '/repo',
+      prompt: 'cheap first',
+      chain: [{ cli: 'qwen' }, { cli: 'kimi' }],
+    });
+
+    cascade.resolve(makeCascadeResult(1));
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+
+    const task = await getTask(baseUrl, id);
+    expect(task.mode).toBe('cascade');
+    expect(task.engineTaskId).toBe('task-eng-3');
+    expect(task.attempts).toEqual([{ level: 1, cli: 'qwen', outcome: 'success', latency: 1200 }]);
+    expect(task.winner).toMatchObject({ level: 1, cli: 'qwen', summary: 'summary L1', diff: 'diff L1' });
+    // pick-time pointers stay server-side, same as compete lanes
+    expect((task.winner as Record<string, unknown>).worktreePath).toBeUndefined();
+    expect((task.winner as Record<string, unknown>).branch).toBeUndefined();
+    expect(task.eventsFile).toBeUndefined();
+
+    const list = (await (await fetch(`${baseUrl}/api/tasks`)).json()) as Record<string, unknown>[];
+    expect(list[0]).toMatchObject({ id, mode: 'cascade', status: 'awaiting_pick' });
+  });
+
+  it('passes a request-body chain through to the engine instead of the default', async () => {
+    const { deps, cascade } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+
+    const chain = [{ cli: 'a' }, { cli: 'b', timeoutMs: 5000 }, { cli: 'c' }];
+    await createCascadeTask(baseUrl, { chain });
+    expect(deps.runCascadeTask).toHaveBeenCalledWith({ repoPath: '/repo', prompt: 'cheap first', chain });
+    cascade.resolve(makeCascadeResult(null));
+  });
+
+  it('rejects a malformed chain with 400', async () => {
+    const baseUrl = await startServer(makeFakeDeps().deps);
+    for (const chain of [[], [{ cli: 5 }], [{ timeoutMs: 1000 }], 'qwen,kimi']) {
+      // oxlint-disable-next-line no-await-in-loop -- sequential requests keep the assertions ordered and readable
+      const res = await postJson(baseUrl, '/api/tasks', { mode: 'cascade', prompt: 'x', chain });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it('no winner → done (chain exhausted), and a pick is rejected with 409', async () => {
+    const { deps, cascade } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createCascadeTask(baseUrl);
+
+    cascade.resolve(makeCascadeResult(null));
+    await waitForStatus(baseUrl, id, 'done');
+
+    const task = await getTask(baseUrl, id);
+    expect(task.winner).toBeNull();
+    expect(task.attempts).toEqual([
+      { level: 1, cli: 'qwen', outcome: 'failed', latency: 1200 },
+      { level: 2, cli: 'kimi', outcome: 'failed', latency: 3400 },
+    ]);
+
+    const res = await postJson(baseUrl, `/api/tasks/${id}/pick`, { pick: 'cascade-1' });
+    expect(res.status).toBe(409);
+    expect(deps.recordPick).not.toHaveBeenCalled();
+  });
+
+  it('pick cascade-N records the gate and merges the winner worktree', async () => {
+    const { deps, cascade } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createCascadeTask(baseUrl);
+    cascade.resolve(makeCascadeResult(2)); // level 1 failed, level 2 won
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+
+    const res = await postJson(baseUrl, `/api/tasks/${id}/pick`, { pick: 'cascade-2' });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe('done');
+
+    expect(deps.recordPick).toHaveBeenCalledWith('/tmp/events.jsonl', {
+      taskId: 'task-eng-3',
+      pick: 'cascade-2',
+      reviewVerdict: null,
+    });
+    expect(deps.mergeLane).toHaveBeenCalledWith({
+      repoPath: '/repo',
+      worktreePath: '/wt/cascade-2',
+      branch: 'modes/t-cascade-2',
+      taskId: 'task-eng-3',
+      pick: 'cascade-2',
+    });
+  });
+
+  it('rejects a pick that does not match the winner level (cascade-2 vs level-1 winner) with 400', async () => {
+    const { deps, cascade } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createCascadeTask(baseUrl);
+    cascade.resolve(makeCascadeResult(1));
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+
+    const res = await postJson(baseUrl, `/api/tasks/${id}/pick`, { pick: 'cascade-2' });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('neither');
+    expect(deps.recordPick).not.toHaveBeenCalled();
+    expect(deps.mergeLane).not.toHaveBeenCalled();
+    expect((await getTask(baseUrl, id)).status).toBe('awaiting_pick');
+  });
+
+  it('pick neither records the gate but never merges', async () => {
+    const { deps, cascade } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createCascadeTask(baseUrl);
+    cascade.resolve(makeCascadeResult(1));
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+
+    const res = await postJson(baseUrl, `/api/tasks/${id}/pick`, { pick: 'neither' });
+    expect(res.status).toBe(200);
+    expect(deps.recordPick).toHaveBeenCalledWith('/tmp/events.jsonl', {
+      taskId: 'task-eng-3',
+      pick: 'neither',
+      reviewVerdict: null,
+    });
+    expect(deps.mergeLane).not.toHaveBeenCalled();
+    expect((await getTask(baseUrl, id)).status).toBe('done');
   });
 });
 
