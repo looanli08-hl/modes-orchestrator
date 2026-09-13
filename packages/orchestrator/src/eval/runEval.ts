@@ -83,7 +83,7 @@ interface Observation {
 
 export function checkExpectations(scenario: EvalScenario, obs: Observation): string[] {
   const failures: string[] = [];
-  const { minLaneSuccess, maxLaneSuccess, expectReview, expectSynthesis, expectWinnerLevel, expectAttempts } =
+  const { minLaneSuccess, maxLaneSuccess, expectReview, expectSynthesis, expectWinnerLevel, expectAttempts, expectWinner } =
     scenario.expect;
   if (minLaneSuccess !== undefined && obs.laneSuccesses < minLaneSuccess) {
     failures.push(`expected >= ${minLaneSuccess} successful lane(s), got ${obs.laneSuccesses}`);
@@ -110,6 +110,19 @@ export function checkExpectations(scenario: EvalScenario, obs: Observation): str
   }
   if (expectAttempts !== undefined && obs.attemptCount !== expectAttempts) {
     failures.push(`expected ${expectAttempts} attempt(s), got ${obs.attemptCount ?? 'unknown'}`);
+  }
+  if (expectWinner !== undefined) {
+    // Proper cascade termination: a winner at any level, or the full chain exhausted.
+    const chainLength = (scenario.chain ?? EVAL_CHAIN).length;
+    const hasWinner = obs.winnerLevel != null;
+    if (expectWinner === true && !hasWinner && obs.attemptCount !== chainLength) {
+      failures.push(
+        `expected a winner or a fully exhausted chain, got no winner after ${obs.attemptCount ?? 'unknown'}/${chainLength} attempt(s)`
+      );
+    }
+    if (expectWinner === false && hasWinner) {
+      failures.push(`expected no winner, got a winner at level ${obs.winnerLevel}`);
+    }
   }
   return failures;
 }

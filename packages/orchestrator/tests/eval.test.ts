@@ -15,7 +15,7 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { checkExpectations, decidePick, runEval, type EvalDeps, type ScenarioResult } from '../src/eval/runEval';
-import type { EvalScenario } from '../src/eval/scenarios';
+import { EVAL_SCENARIOS, selectScenarios, type EvalScenario } from '../src/eval/scenarios';
 import { recordUserPick } from '../src/gate/recordUserPick';
 import type { CascadeResult } from '../src/patterns/cascade';
 import type { RunTaskResult } from '../src/run/runTask';
@@ -162,6 +162,7 @@ function makeDeps(overrides: Partial<EvalDeps> = {}): EvalDeps {
 const COMPETE: EvalScenario = {
   id: 'fake-compete',
   mode: 'compete',
+  tier: 'core',
   prompt: 'do something',
   expect: { minLaneSuccess: 2, expectReview: true },
 };
@@ -169,6 +170,7 @@ const COMPETE: EvalScenario = {
 const BRAINSTORM: EvalScenario = {
   id: 'fake-brainstorm',
   mode: 'brainstorm',
+  tier: 'core',
   prompt: 'think about something',
   expect: { minLaneSuccess: 2, expectSynthesis: true },
 };
@@ -176,6 +178,7 @@ const BRAINSTORM: EvalScenario = {
 const CASCADE: EvalScenario = {
   id: 'fake-cascade',
   mode: 'cascade',
+  tier: 'core',
   prompt: 'do something cheap first',
   chain: [{ cli: 'cheap' }, { cli: 'strong' }],
   expect: { expectWinnerLevel: 1, expectAttempts: 1 },
@@ -443,5 +446,94 @@ describe('runEval', () => {
     expect(results[0].pass).toBe(false);
     expect(results[0].failures[0]).toContain('engine exploded');
     expect(results[1].pass).toBe(true);
+  });
+});
+
+describe('checkExpectations: expectWinner', () => {
+  // A cascade scenario that only demands proper termination: a winner at some level,
+  // or the chain fully exhausted. Never asserts which level won.
+  const scenario: EvalScenario = {
+    ...CASCADE,
+    expect: { expectWinner: true },
+  };
+
+  it('passes with a winner at any level', () => {
+    const obs = { laneSuccesses: 1, hasReview: false, hasSynthesis: null, winnerLevel: 1, attemptCount: 1 };
+    expect(checkExpectations(scenario, obs)).toEqual([]);
+    expect(checkExpectations(scenario, { ...obs, winnerLevel: 2, attemptCount: 2 })).toEqual([]);
+  });
+
+  it('passes when the chain is fully exhausted without a winner', () => {
+    const obs = { laneSuccesses: 0, hasReview: false, hasSynthesis: null, winnerLevel: null, attemptCount: 2 };
+    expect(checkExpectations(scenario, obs)).toEqual([]);
+  });
+
+  it('fails when the chain stops early with no winner', () => {
+    const obs = { laneSuccesses: 0, hasReview: false, hasSynthesis: null, winnerLevel: null, attemptCount: 1 };
+    const failures = checkExpectations(scenario, obs);
+    expect(failures.some((f) => f.includes('winner') && f.includes('exhaust'))).toBe(true);
+  });
+
+  it('expectWinner false fails when a winner exists', () => {
+    const noWinner = { ...CASCADE, expect: { expectWinner: false } };
+    const obs = { laneSuccesses: 1, hasReview: false, hasSynthesis: null, winnerLevel: 1, attemptCount: 1 };
+    expect(checkExpectations(noWinner, obs).some((f) => f.includes('no winner'))).toBe(true);
+    expect(checkExpectations(noWinner, { ...obs, winnerLevel: null, attemptCount: 2 })).toEqual([]);
+  });
+});
+
+describe('selectScenarios (tier filtering)', () => {
+  const extendedId = EVAL_SCENARIOS.find((s) => s.tier === 'extended')!.id;
+
+  it('defaults to core scenarios only', () => {
+    const selected = selectScenarios(EVAL_SCENARIOS);
+    expect(selected.length).toBeGreaterThan(0);
+    expect(selected.every((s) => s.tier === 'core')).toBe(true);
+  });
+
+  it('--all returns every scenario', () => {
+    expect(selectScenarios(EVAL_SCENARIOS, { all: true })).toHaveLength(EVAL_SCENARIOS.length);
+  });
+
+  it('explicit ids ignore tier', () => {
+    const selected = selectScenarios(EVAL_SCENARIOS, { ids: [extendedId] });
+    expect(selected.map((s) => s.id)).toEqual([extendedId]);
+  });
+
+  it('unknown ids select nothing', () => {
+    expect(selectScenarios(EVAL_SCENARIOS, { ids: ['nope'] })).toEqual([]);
+  });
+});
+
+describe('EVAL_SCENARIOS definitions', () => {
+  it('ids are unique', () => {
+    const ids = EVAL_SCENARIOS.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('every scenario has a valid tier, mode, non-empty prompt and at least one expectation', () => {
+    for (const s of EVAL_SCENARIOS) {
+      expect(['core', 'extended']).toContain(s.tier);
+      expect(['compete', 'brainstorm', 'cascade']).toContain(s.mode);
+      expect(s.prompt.trim().length).toBeGreaterThan(0);
+      expect(Object.keys(s.expect).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('the original seven scenarios are all core; the suite has >= 21 scenarios with >= 14 extended', () => {
+    const original = [
+      'simple-create',
+      'modify-existing',
+      'impossible-task',
+      'review-disagree',
+      'three-lane',
+      'brainstorm-basic',
+      'cascade-basic',
+    ];
+    for (const id of original) {
+      expect(EVAL_SCENARIOS.find((s) => s.id === id)?.tier).toBe('core');
+    }
+    expect(EVAL_SCENARIOS.length).toBeGreaterThanOrEqual(21);
+    expect(EVAL_SCENARIOS.filter((s) => s.tier === 'extended').length).toBeGreaterThanOrEqual(14);
   });
 });

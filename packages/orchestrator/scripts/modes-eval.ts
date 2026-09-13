@@ -1,8 +1,9 @@
 /**
  * modes-eval — run the real-CLI end-to-end eval suite, unattended.
  *
- * Usage:  bun packages/orchestrator/scripts/modes-eval.ts [scenarioId...]
- *         (no arguments runs the whole suite)
+ * Usage:  bun packages/orchestrator/scripts/modes-eval.ts [--all] [scenarioId...]
+ *         (no arguments runs the core tier; --all runs every scenario;
+ *          explicit scenario ids run regardless of tier)
  *
  * Every scenario runs the full pipeline against real CLIs (lanes kimi + qwen,
  * reviewer/synthesizer kimi) in a throwaway git repo, auto-picks, merges, verifies,
@@ -15,7 +16,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { EVAL_SCENARIOS } from '../src/eval/scenarios';
+import { EVAL_SCENARIOS, selectScenarios } from '../src/eval/scenarios';
 import { runEval, type ScenarioResult } from '../src/eval/runEval';
 import { mergeLane } from '../src/gate/mergeLane';
 import { recordUserPick } from '../src/gate/recordUserPick';
@@ -27,14 +28,17 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const evalsDir = path.resolve(here, '..', 'evals');
 const runsFile = path.join(evalsDir, 'eval-runs.jsonl');
 
-const ids = process.argv.slice(2);
-const scenarios = ids.length > 0 ? EVAL_SCENARIOS.filter((s) => ids.includes(s.id)) : EVAL_SCENARIOS;
+const args = process.argv.slice(2);
+const all = args.includes('--all');
+const ids = args.filter((a) => a !== '--all');
+const scenarios = selectScenarios(EVAL_SCENARIOS, { ids, all });
 if (scenarios.length === 0) {
   console.error(`no scenario matches; known ids: ${EVAL_SCENARIOS.map((s) => s.id).join(', ')}`);
   process.exit(2);
 }
 
-console.log(`modes-eval: ${scenarios.length} scenario(s), real CLIs (lanes kimi+qwen, reviewer/synthesizer kimi)\n`);
+const scope = ids.length > 0 ? 'selected ids' : all ? 'all tiers' : 'core tier';
+console.log(`modes-eval: ${scenarios.length} scenario(s) (${scope}), real CLIs (lanes kimi+qwen, reviewer/synthesizer kimi)\n`);
 
 const results = await runEval(scenarios, { runTask, runBrainstorm, runCascade, recordPick: recordUserPick, mergeLane });
 
