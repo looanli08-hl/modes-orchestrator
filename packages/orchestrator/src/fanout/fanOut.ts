@@ -23,6 +23,8 @@ export interface SpawnedProcessResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  /** true when the process was killed by the spawner's timeout, not by exiting */
+  timedOut?: boolean;
 }
 
 export interface FanOutDeps {
@@ -36,6 +38,9 @@ export interface FanOutLaneResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  timedOut?: boolean;
+  /** wall-clock ms from worktree creation to process exit */
+  latency: number;
 }
 
 export interface FanOutResult {
@@ -53,6 +58,7 @@ export async function fanOut(options: FanOutOptions, deps: FanOutDeps): Promise<
 
   const lanes = await Promise.all(
     options.lanes.map(async ({ lane, cli }) => {
+      const started = Date.now();
       const cwd = await deps.createWorktree(lane);
       const result = await deps.spawnProcess(cli, ['-p', options.prompt], { cwd });
       return {
@@ -61,6 +67,8 @@ export async function fanOut(options: FanOutOptions, deps: FanOutDeps): Promise<
         exitCode: result.exitCode,
         stdout: result.stdout,
         stderr: result.stderr,
+        timedOut: result.timedOut,
+        latency: Date.now() - started,
       };
     })
   );

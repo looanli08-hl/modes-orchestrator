@@ -20,7 +20,7 @@ modes 智能编排器：fork 自 AionUi v2.2.2（Apache-2.0），在其产品壳
 | `packages/web-cli/` | WebUI/headless 模式独立 CLI（bin `aionui-web`，~680 LOC），不依赖 Electron——**只读** |
 | `packages/web-host/` | WebUI 宿主库（~3.9k LOC）：spawn aioncore 后端 + 静态托管 SPA + 反向代理，desktop↔web 共享枢纽——**只读** |
 | `packages/shared-scripts/` | 跨包构建脚本（prepare-aioncore / 打包资源校验）——**只读** |
-| **`packages/orchestrator/`** | **我们的独立包**（尚未创建）：全部编排逻辑（fan-out、worker 契约、交叉评审、JSONL 埋点）只许住在这里，经适配层接触 AionUi 核心 |
+| **`packages/orchestrator/`** | **我们的独立包**：全部编排逻辑（fan-out、worker 契约、交叉评审、JSONL 埋点）只许住在这里，经适配层接触 AionUi 核心。已实现：schema/eventLog、eventLogStore、workerStateMachine、spawnWorker、fanOut、settleResult、userGate、effectClassification、workerOutput 解析、crossReview、runTask 端到端流水线 |
 | `examples/` | 上游扩展示例（hello-world 全能力演示、acp-adapter-extension 最小 ACP 贡献、e2e-full-extension 测试夹具、ext-feishu、ext-wecom-bot），是适配层参考教材 |
 | `docs/` | 上游文档 + 我们的创始文档（vision/constitution/research/spec-mvp/week-1/**seams**） |
 | `tests/` | 上游全部测试的家：unit/ 515 个 vitest、e2e/ 121 个 Playwright spec、fixtures/（fake-acp-cli 等） |
