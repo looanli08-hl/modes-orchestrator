@@ -10,5 +10,6 @@ export * from './review/crossReview';
 export * from './settlement/settleResult';
 export * from './gate/userGate';
 export * from './gate/recordUserPick';
+export * from './gate/mergeLane';
 export * from './run/runTask';
 export * from './operations/effectClassification';
