@@ -28,13 +28,18 @@
 
 | CLI | 状态 |
 |---|---|
-| `kimi` 0.42.0 | ✅ `-p` 非交互可用（夹具来源） |
-| `claude` | ❌ OAuth session expired，需重新登录 |
-| `codex` 0.137.0 | ❌ models cache 报错（`unknown variant 'max'`），需排查 |
-| `qwen` / `gemini` | ⚠️ 未安装（国产模型重心下 qwen 优先级高） |
+| `kimi` 0.42.0 | ✅ `-p` 非交互可用（夹具来源），当前模型 `kimi-code/k3` |
+| `qwen` 0.23.3 | ⚠️ 已安装，但 **Qwen OAuth 免费额度 2026-04-15 已停用**——需 Coding Plan（付费）或 DashScope API key（`--auth-type openai` + 百炼 key） |
+| `iflow` 0.5.19 | ⏳ 已安装，等用户填 API key 到 `~/.iflow/settings.json`（模板已预写，默认模型 Qwen3-Coder）。**免费，一个 key 通 Kimi K2 / Qwen3 / DeepSeek / GLM** |
+| `claude` | ❌ OAuth session expired，用户表示国外模型暂不可用，搁置 |
+| `codex` 0.137.0 | ❌ models cache 报错（`unknown variant 'max'`），同上搁置 |
+
+**路线决定（2026-09-13 用户拍板）**：MVP 双路全用国产模型。lane A = kimi，lane B = iflow（免费多模型），qwen 作为备选第三端点。
+
+未认证报错已录入 `tests/fixtures/`（qwen/iflow auth-missing），钉住"认证失败 = failed，不误判 quota_exhausted"的解析行为。
 
 ### 下一步
 
-1. 修通至少第二个 CLI（claude 重登录 / 装 qwen），用真实双 CLI 跑 `runTask` 验证
+1. 用户填 iflow API key → 立刻跑 **kimi + iflow 真实双路 fan-out** 端到端验证
 2. A4 手动验收：真实仓库上完成一次"选优合并"（需要人）
-3. `runTask` 目前 `model: 'unknown'`——真实模型标识需要从 CLI 参数或配置透传
+3. `runTask` 目前 `model: 'unknown'`——真实模型标识从 CLI 配置透传（kimi: `~/.kimi-code/config.toml` 的 default_model；iflow: settings.json 的 modelName）

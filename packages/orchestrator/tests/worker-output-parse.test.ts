@@ -53,4 +53,13 @@ describe('parseWorkerOutput: CLI output → fixed schema (A2)', () => {
     const result = parseWorkerOutput({ exitCode: 0, stdout: 'rate limit hit, stopped early', stderr: '' });
     expect(result.outcome).toBe('quota_exhausted');
   });
+
+  it.each(['qwen-auth-missing.stderr', 'iflow-auth-missing.stderr'])(
+    'real auth-missing output %s → failed, NOT quota_exhausted (auth failure ≠ quota)',
+    async (fixture) => {
+      const stderr = await readFile(path.join(fixtures, fixture), 'utf8');
+      const result = parseWorkerOutput({ exitCode: 1, stdout: '', stderr });
+      expect(result.outcome).toBe('failed');
+    }
+  );
 });
