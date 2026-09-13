@@ -111,3 +111,11 @@ bun run dev
 - [x] **评测器首功**：抓到 runTask 评审失败分支缺 `pick` 字段（已修）
 - [x] 调研结论：promptfoo/deepeval 评的是模型输出质量，不认识编排协议语义（merge 落盘/JSONL 契约/gate 流转）——协议回归套件必须自建；模型质量评测未来可 leverage promptfoo
 - 观察：`review-disagree` 两轮 kimi 均稳定胜出 qwen —— 路由记忆数据开始积累
+
+## Day 1 续 6 — N 路 compete（锦标赛第一步）
+
+- [x] **N 路泛化**：`parseReviewVerdict(text, knownLanes?)`（PICK 任意 lane 字母，指向场外 lane = null 不伪造）；`createTaskLifecycle(taskId, {lanes})`（pick ∈ lanes ∪ neither，默认 A/B 向后兼容）；console pick 端点/panel 按钮/modes-run 提示/eval decidePick 全部 lane 感知；spec-mvp §2 措辞更新
+- [x] eval 新场景 `three-lane`（kimi/qwen/kimi 二次尝试当 lane C）：真实跑 PASS，事件流 3 worker + reviewer + gate 齐
+- [x] **评测器第二功**：three-lane 最初 5 次全报 quota_exhausted——查实为误报：prompt 让写"rate limiter"，CLI 回显关键词即被 quota 检测误判（exit 0 也查全量输出）。修复：exit 0 时仅当输出 < 300 字符（纯道歉无产出）才判 quota_exhausted；短输出真 quota（如 "rate limit hit, stopped early"）行为不变。TDD 红→绿
+- [x] three-lane 场景 prompt 改回 rate limiter 题材，兼任该 bug 的真实回归
+- 测试总数 154 全绿

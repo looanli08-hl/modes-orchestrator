@@ -84,11 +84,11 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
       { lane: 'B', cli: 'qwen' },
       { lane: 'C', cli: 'kimi' },
     ],
-    // Open-ended enough that lanes plausibly take different approaches (parking queue vs
-    // counter+await vs batch drain); we only assert the pipeline ran, never which lane wins.
-    // The subject must not mention rate limits/quotas — workerOutput's quota detector
-    // would read the prompt echo as a quota failure (false positive, flagged 2026-09-13).
-    prompt: 'Implement a concurrency pool in pool.js: run async tasks with at most 3 in flight at a time, exposing a simple run(task) API.',
+    // Open-ended enough that lanes plausibly take different approaches; we only assert
+    // the pipeline ran, never which lane wins. The subject deliberately mentions rate
+    // limits — it doubles as a regression for the quota-detector false positive fixed
+    // on 2026-09-13 (exit-0 lanes with substantial output are no longer misjudged).
+    prompt: 'Implement a rate limiter in limiter.js: a sliding-window limiter with configurable capacity and refill interval, exposing a simple allow(key) API.',
     expect: { minLaneSuccess: 2, expectReview: true },
   },
   {
