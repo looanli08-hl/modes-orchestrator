@@ -29,17 +29,25 @@
 | CLI | 状态 |
 |---|---|
 | `kimi` 0.42.0 | ✅ `-p` 非交互可用（夹具来源），当前模型 `kimi-code/k3` |
-| `qwen` 0.23.3 | ⚠️ 已安装，但 **Qwen OAuth 免费额度 2026-04-15 已停用**——需 Coding Plan（付费）或 DashScope API key（`--auth-type openai` + 百炼 key） |
-| `iflow` 0.5.19 | ⚠️ key 有效（错 key 报 434，正确 key 报 435）但**账号下所有模型均 "Model not support"**（qwen3-coder-plus / kimi-k2.5 / deepseek-v3.2-chat / glm-5 / minimax-m2.5 全部试过）。`selectedAuthType` 需用 `openai-compatible`（`iflow` 已弃用）。疑似免费 API 政策收紧或需在控制台开通模型——待用户查控制台 |
+| `qwen` 0.23.3 | ✅ **已打通 = lane B**。OAuth 免费额度 2026-04-15 停用 → 改走 ModelScope 免费推理 API：`~/.qwen/.env` 配 `OPENAI_API_KEY/BASE_URL/MODEL`（`api-inference.modelscope.cn/v1`，模型 `Qwen/Qwen3-Coder-30B-A3B-Instruct`，settings `selectedType: openai`） |
+| `iflow` 0.5.19 | ⚠️ key 有效（错 key 报 434，正确 key 报 435）但**账号下所有模型均 "Model not support"**（qwen3-coder-plus / kimi-k2.5 / deepseek-v3.2-chat / glm-5 / minimax-m2.5 全部试过）。`selectedAuthType` 需用 `openai-compatible`（`iflow` 已弃用）。疑似免费 API 政策收紧，搁置 |
 | `claude` | ❌ OAuth session expired，用户表示国外模型暂不可用，搁置 |
 | `codex` 0.137.0 | ❌ models cache 报错（`unknown variant 'max'`），同上搁置 |
 
-**路线决定（2026-09-13 用户拍板）**：MVP 双路全用国产模型。lane A = kimi。lane B 候选（按优先级）：iflow（若控制台能开通模型）→ ModelScope 免费 API（`api-inference.modelscope.cn/v1`，OpenAI 兼容，经 qwen CLI `--auth-type openai` 接入）→ DeepSeek 官方 API（付费但极便宜）→ 百炼 DashScope（新用户有免费额度）。**编排层对 provider 无感——任何 OpenAI 兼容端点都能借 qwen CLI 变成一路 worker。**
+**路线决定（2026-09-13 用户拍板）**：MVP 双路全用国产模型。**lane A = kimi（K3），lane B = qwen CLI → ModelScope（Qwen3-Coder-30B）**。iflow 等免费政策明朗再入池。**编排层对 provider 无感——任何 OpenAI 兼容端点都能借 qwen CLI 变成一路 worker。**
 
 未认证/模型不可用报错已录入 `tests/fixtures/`（qwen/iflow auth-missing），钉住"认证失败 = failed，不误判 quota_exhausted"的解析行为。
 
+## Day 1 续 — 真实双路 fan-out 打通（MVP 链路全线验证）
+
+- [x] ModelScope token 配置进 qwen CLI（OpenAI 兼容模式），`qwen -p` 跑通
+- [x] **CLI 适配层 `spawn/cliAdapters`**（5 测试）：qwen/iflow 需 `--yolo` 否则"exit 0 但零产出"；
+  kimi `-p` 与 `--auto` 互斥（`Cannot combine --prompt with --auto`），裸 `-p` 本就无人值守——两条都是实测踩出来的
+- [x] `scripts/manual-fanout.ts`（A4 验收工具）：一条命令真实 fan-out + 打印双路 diff + 评审结论
+- [x] **真实端到端三次迭代**：① kimi ✅ / qwen 零产出（发现 --yolo 需求）→ ② qwen ✅ / kimi 被拒（发现 --auto 互斥）→ ③ **双双成功，diff 一致（同 blob hash），kimi 评审 "agreed" 且理由具体**；JSONL 三条记录 latency 真实（并行两路各 ~9.4s，评审 12.4s），状态停在 `awaiting_user_pick`
+
 ### 下一步
 
-1. 用户填 iflow API key → 立刻跑 **kimi + iflow 真实双路 fan-out** 端到端验证
-2. A4 手动验收：真实仓库上完成一次"选优合并"（需要人）
-3. `runTask` 目前 `model: 'unknown'`——真实模型标识从 CLI 配置透传（kimi: `~/.kimi-code/config.toml` 的 default_model；iflow: settings.json 的 modelName）
+1. A4 手动验收：真实仓库上跑一次有区分度的任务，用户完成"选优合并"
+2. `runTask` 目前 `model: 'unknown'`——真实模型标识从 CLI 配置透传（kimi: `~/.kimi-code/config.toml` 的 default_model；qwen: `~/.qwen/.env` 的 OPENAI_MODEL）
+3. kimi 报错时 exit 0 的怪癖（`error: Cannot combine...` 也是 exit 0）——解析器后续需要"stdout 以 error: 开头视为 failed"的防御（已观察，未实现）

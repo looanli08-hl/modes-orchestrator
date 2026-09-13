@@ -6,6 +6,7 @@
  */
 
 import { OrchestratorError } from '../errors';
+import { buildWorkerArgs } from '../spawn/cliAdapters';
 import { PROMPT_MAX_BYTES } from '../spawn/spawnWorker';
 
 export interface FanOutLane {
@@ -60,7 +61,7 @@ export async function fanOut(options: FanOutOptions, deps: FanOutDeps): Promise<
     options.lanes.map(async ({ lane, cli }) => {
       const started = Date.now();
       const cwd = await deps.createWorktree(lane);
-      const result = await deps.spawnProcess(cli, ['-p', options.prompt], { cwd });
+      const result = await deps.spawnProcess(cli, buildWorkerArgs(cli, options.prompt), { cwd });
       return {
         lane,
         outcome: result.exitCode === 0 ? ('success' as const) : ('failed' as const),

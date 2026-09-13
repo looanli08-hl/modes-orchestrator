@@ -14,6 +14,7 @@ import { diffWorktree, makeRealDeps } from '../fanout/realDeps';
 import { createTaskLifecycle, type TaskState } from '../gate/userGate';
 import { parseWorkerOutput } from '../parse/workerOutput';
 import { buildReviewPrompt, parseReviewVerdict, type ReviewVerdict } from '../review/crossReview';
+import { buildWorkerArgs } from '../spawn/cliAdapters';
 import { EVENT_LOG_SCHEMA_VERSION, type EventLogOutcome } from '../schema/eventLog';
 import { createResultStore } from '../settlement/settleResult';
 import { appendEvent } from '../store/eventLogStore';
@@ -121,7 +122,9 @@ export async function runTask(options: RunTaskOptions): Promise<RunTaskResult> {
       lanes: lanes.map((l) => ({ lane: l.lane, summary: l.summary, diff: l.diff })),
     });
     const started = Date.now();
-    const raw = await deps.spawnProcess(reviewerCli, ['-p', reviewPrompt], { cwd: options.repoPath });
+    const raw = await deps.spawnProcess(reviewerCli, buildWorkerArgs(reviewerCli, reviewPrompt), {
+      cwd: options.repoPath,
+    });
     const parsed = parseWorkerOutput(raw);
     review = parsed.outcome === 'success' ? parseReviewVerdict(parsed.summary) : { verdict: 'failed', rationale: parsed.summary };
 
