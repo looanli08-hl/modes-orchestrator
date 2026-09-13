@@ -125,3 +125,10 @@ bun run dev
 - [x] taskRegistry 加 persistence 适配器注入 + `filePersistence.ts`（原子写 `.modes-console-tasks.json`，gitignored）；僵尸 running 任务 load 时如实标 failed；修剪最近 100 条；pick 指针（worktreePath/branch）一并持久化，重启后 awaiting_pick 仍可 pick。12 新测试，总数 166 全绿
 - [x] 冒烟：server 重启后任务历史和详情完整恢复（4299 端口实测）
 - [x] 4177 的 console 已重启为最新版（持久化 + token + N 路），旧内存实例已清
+
+## Day 1 续 8 — cascade 模式落地（三种编排模式齐了）
+
+- [x] `src/patterns/cascade.ts`：串行降级链，升级只认客观信号（outcome ≠ success 或 success 但空 diff）；每级独立 worktree + JSONL（attempt_seq 递增——stale_attempt 设计的真实用例）；质量型升级有意不做（注释标明后续项）
+- [x] modes-run --mode cascade（Merge? [y/N] gate）；eval 场景 cascade-basic
+- [x] **全量 eval 收官：7/7 通过**。cascade-basic 实证早停语义：qwen 一级 9s 成功，kimi 零调用零额度消耗
+- spec-mvp 模式表三模式（compete/brainstorm/cascade）全部从措辞变为实现
