@@ -248,3 +248,5 @@ packages/orchestrator/extension/modes-console/assets/
 
 # eval harness output — run data, not code (packages/orchestrator/scripts/modes-eval.ts)
 packages/orchestrator/evals/
+# modes worker worktrees (git worktree residue from orchestrator runs)
+.modes-worktrees/
