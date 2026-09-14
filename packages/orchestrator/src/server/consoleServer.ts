@@ -3,7 +3,8 @@
  * Plain node:http on 127.0.0.1, no dependencies: the panel is one static HTML file
  * and the API is a thin JSON wrapper over the engine. Engine calls are injected as
  * narrow deps so tests feed fakes; real wiring lives in scripts/modes-console.ts.
- * Engine runs are async — POST returns immediately and the panel polls for state.
+ * Engine runs are async — POST returns immediately and the panel follows progress
+ * via SSE (GET /api/tasks/:id/events), falling back to 2s polling.
  *
  * Security: when deps.token is set (the scripts/modes-console.ts default, shared
  * via packages/orchestrator/.modes-console-token), all /api/* routes require a
@@ -135,6 +136,52 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   const payload = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   res.end(payload);
+}
+
+/** statuses at which an SSE stream has delivered its final event and closes */
+const SSE_TERMINAL_STATUSES = new Set(['awaiting_pick', 'done', 'failed']);
+
+/**
+ * GET /api/tasks/:id/events — Server-Sent Events stream of task state.
+ * Sends the current state immediately, then an event on every registry change
+ * for this task (status machine granularity; lanes have no mid-run state), and
+ * closes the stream after pushing a terminal status (awaiting_pick / done /
+ * failed). EventSource cannot send custom headers, so this route also accepts
+ * the token as a ?token= query parameter (loopback console, same value as the
+ * x-modes-token header; CORS stays open and useless without it).
+ */
+function handleTaskEvents(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  registry: TaskRegistry,
+  taskId: string
+): void {
+  const task = registry.get(taskId);
+  if (!task) return sendJson(res, 404, { error: `unknown task ${taskId}` });
+
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+  });
+
+  const send = (t: ConsoleTask): void => {
+    res.write(`data: ${JSON.stringify(taskDetailView(t))}\n\n`);
+  };
+  const close = (): void => {
+    unsubscribe();
+    res.end();
+  };
+  const unsubscribe = registry.subscribe((changed) => {
+    if (changed.id !== taskId) return;
+    send(changed);
+    if (SSE_TERMINAL_STATUSES.has(changed.status)) close();
+  });
+  req.on('close', unsubscribe);
+
+  send(task);
+  // late subscribers to an already-finished task get the final state and a clean close
+  if (SSE_TERMINAL_STATUSES.has(task.status)) close();
 }
 
 async function readBody(req: http.IncomingMessage): Promise<string> {
@@ -318,14 +365,20 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
 
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const pickMatch = /^\/api\/tasks\/([^/]+)\/pick$/.exec(url.pathname);
+    const eventsMatch = /^\/api\/tasks\/([^/]+)\/events$/.exec(url.pathname);
     const taskMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname);
 
     try {
       // public liveness probe (used by the extension's activate.js)
       if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true });
 
-      if (deps.token && url.pathname.startsWith('/api/') && req.headers['x-modes-token'] !== deps.token) {
-        return sendJson(res, 401, { error: 'unauthorized: missing or wrong x-modes-token header' });
+      if (deps.token && url.pathname.startsWith('/api/')) {
+        // EventSource cannot set headers, so the SSE route also honors ?token=
+        const presented =
+          req.headers['x-modes-token'] ?? (eventsMatch ? url.searchParams.get('token') : null);
+        if (presented !== deps.token) {
+          return sendJson(res, 401, { error: 'unauthorized: missing or wrong x-modes-token header' });
+        }
       }
 
       if (req.method === 'GET' && url.pathname === '/') {
@@ -339,6 +392,9 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
         const task = registry.get(decodeURIComponent(taskMatch[1]));
         if (!task) return sendJson(res, 404, { error: `unknown task ${taskMatch[1]}` });
         return sendJson(res, 200, taskDetailView(task));
+      }
+      if (req.method === 'GET' && eventsMatch) {
+        return handleTaskEvents(req, res, registry, decodeURIComponent(eventsMatch[1]));
       }
       if (req.method === 'POST' && pickMatch) return await handlePick(req, res, decodeURIComponent(pickMatch[1]));
       sendJson(res, 404, { error: 'not found' });

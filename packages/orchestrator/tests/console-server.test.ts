@@ -146,6 +146,41 @@ async function createCompeteTask(baseUrl: string): Promise<string> {
   return ((await res.json()) as { id: string }).id;
 }
 
+/**
+ * Read up to `count` SSE data frames from an events response, then check
+ * whether the server closed the stream (short race, since the terminal close
+ * lands right after the final frame).
+ */
+async function collectEvents(res: Response, count: number): Promise<{ events: Record<string, unknown>[]; closed: boolean }> {
+  const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const events: Record<string, unknown>[] = [];
+  let closed = false;
+  while (events.length < count) {
+    // oxlint-disable-next-line no-await-in-loop -- stream frames are inherently sequential
+    const { done, value } = await reader.read();
+    if (done) {
+      closed = true;
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const dataLine = frame.split('\n').find((l) => l.startsWith('data: '));
+      if (dataLine) events.push(JSON.parse(dataLine.slice(6)) as Record<string, unknown>);
+    }
+  }
+  if (!closed) {
+    const next = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 500))]);
+    closed = next?.done === true;
+  }
+  await reader.cancel().catch(() => {});
+  return { events, closed };
+}
+
 describe('GET /', () => {
   it('serves the panel HTML', async () => {
     const baseUrl = await startServer(makeFakeDeps().deps);
@@ -621,6 +656,10 @@ describe('auto mode routing', () => {
     expect(task.mode).toBe('cascade');
     expect(task.classification).toMatchObject({ mode: 'cascade', confidence: 'high' });
     expect((task.classification as { reason: string }).reason.length).toBeGreaterThan(0);
+
+    // the list summary carries the classification too (the panel badges auto tasks)
+    const list = (await (await fetch(`${baseUrl}/api/tasks`)).json()) as Record<string, unknown>[];
+    expect(list[0]).toMatchObject({ id, mode: 'cascade', classification: { mode: 'cascade' } });
   });
 
   it('resolves an opinion prompt to brainstorm', async () => {
@@ -664,6 +703,64 @@ describe('auto mode routing', () => {
     compete.resolve(makeCompeteResult());
     await waitForStatus(baseUrl, id, 'awaiting_pick');
     expect((await getTask(baseUrl, id)).classification).toBeNull();
+  });
+});
+
+describe('GET /api/tasks/:id/events (SSE)', () => {
+  it('returns 404 for an unknown task', async () => {
+    const baseUrl = await startServer(makeFakeDeps().deps);
+    const res = await fetch(`${baseUrl}/api/tasks/nope/events`);
+    expect(res.status).toBe(404);
+  });
+
+  it('sends the current state, pushes status changes, and closes after a terminal status', async () => {
+    const { deps, compete } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createCompeteTask(baseUrl);
+
+    const res = await fetch(`${baseUrl}/api/tasks/${id}/events`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+
+    compete.resolve(makeCompeteResult());
+    const { events, closed } = await collectEvents(res, 2);
+    expect(events[0]).toMatchObject({ id, status: 'running' });
+    expect(events[1]).toMatchObject({ id, status: 'awaiting_pick' });
+    // awaiting_pick is terminal for the stream — the server hangs up
+    expect(closed).toBe(true);
+  });
+
+  it('a late subscriber to a finished task gets the final state and a closed stream', async () => {
+    const { deps, brainstorm } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const res = await postJson(baseUrl, '/api/tasks', { mode: 'brainstorm', prompt: 'think' });
+    const { id } = (await res.json()) as { id: string };
+    brainstorm.resolve(makeBrainstormResult());
+    await waitForStatus(baseUrl, id, 'done');
+
+    const stream = await fetch(`${baseUrl}/api/tasks/${id}/events`);
+    const { events, closed } = await collectEvents(stream, 1);
+    expect(events[0]).toMatchObject({ id, status: 'done' });
+    expect(closed).toBe(true);
+  });
+
+  it('honors the token as a ?token= query param (EventSource cannot send headers)', async () => {
+    const TOKEN = 'sse-token-123';
+    const baseUrl = await startServer({ ...makeFakeDeps().deps, token: TOKEN });
+    const createRes = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-modes-token': TOKEN },
+      body: JSON.stringify({ mode: 'brainstorm', prompt: 'think' }),
+    });
+    const { id } = (await createRes.json()) as { id: string };
+
+    expect((await fetch(`${baseUrl}/api/tasks/${id}/events`)).status).toBe(401);
+    expect((await fetch(`${baseUrl}/api/tasks/${id}/events?token=wrong`)).status).toBe(401);
+
+    const ok = await fetch(`${baseUrl}/api/tasks/${id}/events?token=${TOKEN}`);
+    expect(ok.status).toBe(200);
+    const { events } = await collectEvents(ok, 1);
+    expect(events[0]).toMatchObject({ id, status: 'running' });
   });
 });
 

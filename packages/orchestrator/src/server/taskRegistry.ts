@@ -73,10 +73,15 @@ export interface ConsoleTask {
 export interface ConsoleTaskSummary {
   id: string;
   mode: ConsoleTaskMode;
+  /** routing decision when the task was created with mode "auto"; null otherwise */
+  classification: TaskClassification | null;
   prompt: string;
   status: ConsoleTaskStatus;
   createdAt: string;
 }
+
+/** called after every state change of one task (create, completion, failure, pick) */
+export type TaskChangeListener = (task: ConsoleTask) => void;
 
 export interface TaskRegistry {
   /** load persisted state (no-op without persistence); call once before serving */
@@ -102,6 +107,12 @@ export interface TaskRegistry {
   markDone(id: string): void;
   /** pick application failed — task stays awaiting_pick so the human can retry */
   setError(id: string, error: unknown): void;
+  /**
+   * Subscribe to state changes; the listener receives the changed task after
+   * every mutation. Returns an unsubscribe function. Used by the console's SSE
+   * endpoint to push progress instead of relying on panel polling alone.
+   */
+  subscribe(listener: TaskChangeListener): () => void;
 }
 
 /**
@@ -134,6 +145,7 @@ function isConsoleTask(value: unknown): value is ConsoleTask {
 
 export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
   const tasks = new Map<string, ConsoleTask>();
+  const listeners = new Set<TaskChangeListener>();
   const persistence = deps.persistence;
   let seq = 0;
   // saves are serialized: a slow/failed write must never interleave with or block the next one
@@ -145,13 +157,23 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
     saveQueue = saveQueue.then(() => persistence.save(snapshot)).catch((err) => console.error('task save failed:', err));
   };
 
-  /** drop the oldest tasks beyond MAX_TASKS, then save */
-  const changed = (): void => {
+  /** drop the oldest tasks beyond MAX_TASKS, then save, then notify subscribers */
+  const changed = (task?: ConsoleTask): void => {
     if (tasks.size > MAX_TASKS) {
       const ordered = [...tasks.values()].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
-      for (const task of ordered.slice(0, ordered.length - MAX_TASKS)) tasks.delete(task.id);
+      for (const old of ordered.slice(0, ordered.length - MAX_TASKS)) tasks.delete(old.id);
     }
     persist();
+    if (task) {
+      for (const listener of listeners) {
+        // a broken subscriber (e.g. a half-closed SSE socket) must not break the registry
+        try {
+          listener(task);
+        } catch (err) {
+          console.error('task change listener failed:', err);
+        }
+      }
+    }
   };
 
   const requireTask = (id: string): ConsoleTask => {
@@ -200,7 +222,7 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
         cascade: null,
       };
       tasks.set(task.id, task);
-      changed();
+      changed(task);
       return task;
     },
 
@@ -209,7 +231,19 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
     list: () =>
       [...tasks.values()]
         .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
-        .map((t) => ({ id: t.id, mode: t.mode, prompt: t.prompt, status: t.status, createdAt: t.createdAt })),
+        .map((t) => ({
+          id: t.id,
+          mode: t.mode,
+          classification: t.classification,
+          prompt: t.prompt,
+          status: t.status,
+          createdAt: t.createdAt,
+        })),
+
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
 
     completeCompete(id, result) {
       const task = requireTask(id);
@@ -218,7 +252,7 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
       task.compete = { lanes: result.lanes, review: result.review };
       // runTask always lands in awaiting_user_pick — the gate can only be resolved by a human pick
       task.status = 'awaiting_pick';
-      changed();
+      changed(task);
     },
 
     completeBrainstorm(id, result) {
@@ -227,7 +261,7 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
       task.eventsFile = result.eventsFile;
       task.brainstorm = { lanes: result.lanes, synthesis: result.synthesis };
       task.status = 'done';
-      changed();
+      changed(task);
     },
 
     completeCascade(id, result) {
@@ -238,27 +272,27 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
       // a winner leaves the merge decision to the human; an exhausted chain is
       // terminal on its own — the failure is presented honestly, never fabricated
       task.status = result.winner ? 'awaiting_pick' : 'done';
-      changed();
+      changed(task);
     },
 
     fail(id, error) {
       const task = requireTask(id);
       task.status = 'failed';
       task.error = error instanceof Error ? error.message : String(error);
-      changed();
+      changed(task);
     },
 
     markDone(id) {
       const task = requireTask(id);
       task.status = 'done';
       task.error = null;
-      changed();
+      changed(task);
     },
 
     setError(id, error) {
       const task = requireTask(id);
       task.error = error instanceof Error ? error.message : String(error);
-      changed();
+      changed(task);
     },
   };
 }

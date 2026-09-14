@@ -76,6 +76,21 @@
   .badge.ok { color: var(--ok); border-color: rgba(26,127,55,0.35); }
   .badge.bad { color: var(--bad); border-color: rgba(209,36,47,0.35); }
   .badge.warn { color: var(--warn); border-color: rgba(154,103,0,0.35); }
+  .badge.auto { color: var(--accent); border-color: rgba(9,105,218,0.4); background: transparent; }
+  .badge.mode { color: var(--fg); }
+
+  .banner.classification { border-color: rgba(9,105,218,0.35); }
+  .banner.classification .verdict { color: var(--accent); }
+
+  pre.diff .diff-line { display: block; }
+  pre.diff .diff-line.add { color: var(--ok); background: rgba(26,127,55,0.07); }
+  pre.diff .diff-line.del { color: var(--bad); background: rgba(209,36,47,0.07); }
+  pre.diff .diff-line.hunk { color: var(--accent); }
+  .diff-toggle {
+    margin-top: 6px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .diff-toggle:hover { background: var(--surface); }
 
   .banner {
     border: 1px solid var(--border); border-radius: 6px; background: var(--surface);
@@ -121,7 +136,8 @@
   <aside>
     <form id="run-form">
       <div class="mode-toggle">
-        <button type="button" id="mode-compete" class="active">compete</button>
+        <button type="button" id="mode-auto" class="active">auto</button>
+        <button type="button" id="mode-compete">compete</button>
         <button type="button" id="mode-brainstorm">brainstorm</button>
         <button type="button" id="mode-cascade">cascade</button>
       </div>
@@ -158,12 +174,23 @@ const apiUrl = {
     VIA_EXTENSION_PROXY ? `${API_BASE}/task?id=${encodeURIComponent(id)}` : `${API_BASE}/tasks/${encodeURIComponent(id)}`,
   pick: (id) =>
     VIA_EXTENSION_PROXY ? `${API_BASE}/pick` : `${API_BASE}/tasks/${encodeURIComponent(id)}/pick`,
+  // EventSource cannot send headers, so the shared token rides as ?token= (the
+  // server honors it on this route only). No events route exists on the
+  // extension proxy — SSE is skipped there and polling is used.
+  events: (id) =>
+    `${API_BASE}/tasks/${encodeURIComponent(id)}/events${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ""}`,
 };
 
+const TERMINAL_STATUSES = new Set(["awaiting_pick", "done", "failed"]);
+
 const state = {
-  mode: "compete",
+  mode: "auto",
   selectedId: null,
   pollTimer: null,
+  eventSource: null,
+  lastTask: null,
+  // diff fold state survives re-renders: key = "<taskId>:<lane|winner>"
+  expandedDiffs: new Set(),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -185,6 +212,52 @@ function statusBadge(status) {
   return `<span class="badge ${cls}">${esc(status.replace("_", " "))}</span>`;
 }
 
+// auto-routed tasks show the resolved mode with an "auto" corner badge
+function modeBadge(task) {
+  const auto = task.classification ? `<span class="badge auto">auto</span>` : "";
+  return `<span class="badge mode">${esc(task.mode)}</span>${auto}`;
+}
+
+function relativeTime(iso) {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 45) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+// --- diff rendering -------------------------------------------------------
+// diffLineClass/renderDiff are pure and would be unit-testable, but the panel
+// is a single buildless file (see top of this script) — extracting them to a
+// JS module would break that constraint, so they stay inline. The logic is
+// deliberately trivial (prefix classification only, no diff grammar).
+
+const DIFF_FOLD_LINES = 200;
+
+function diffLineClass(line) {
+  if (line.startsWith("@@")) return "hunk";
+  if (line.startsWith("+++") || line.startsWith("---")) return "";
+  if (line.startsWith("+")) return "add";
+  if (line.startsWith("-")) return "del";
+  return "";
+}
+
+function renderDiff(diff, key) {
+  const lines = diff.split("\n");
+  const expanded = state.expandedDiffs.has(key);
+  const folded = !expanded && lines.length > DIFF_FOLD_LINES;
+  const shown = folded ? lines.slice(0, DIFF_FOLD_LINES) : lines;
+  const html =
+    `<pre class="diff">` +
+    shown.map((l) => `<span class="diff-line ${diffLineClass(l)}">${esc(l)}</span>`).join("\n") +
+    `</pre>`;
+  if (lines.length <= DIFF_FOLD_LINES) return html;
+  const label = expanded ? "show less" : `show more (${lines.length - DIFF_FOLD_LINES} more lines)`;
+  return html + `<button class="diff-toggle" data-diff-key="${esc(key)}">${label}</button>`;
+}
+
 function outcomeBadge(outcome) {
   return `<span class="badge ${outcome === "success" ? "ok" : "bad"}">${esc(outcome)}</span>`;
 }
@@ -194,7 +267,7 @@ async function refreshTaskList() {
   $("task-list").innerHTML = tasks.map((t) => `
     <div class="task-item ${t.id === state.selectedId ? "selected" : ""}" data-id="${esc(t.id)}">
       <div class="prompt">${esc(t.prompt)}</div>
-      <div class="meta">${statusBadge(t.status)}<span class="muted">${esc(t.mode)}</span></div>
+      <div class="meta">${modeBadge(t)}${statusBadge(t.status)}<span class="muted">${esc(relativeTime(t.createdAt))}</span></div>
     </div>`).join("");
   for (const el of document.querySelectorAll(".task-item")) {
     el.addEventListener("click", () => selectTask(el.dataset.id));
@@ -203,6 +276,38 @@ async function refreshTaskList() {
 
 function stopPolling() {
   if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+}
+
+function stopEventStream() {
+  if (state.eventSource) { state.eventSource.close(); state.eventSource = null; }
+}
+
+function stopFollowing() {
+  stopPolling();
+  stopEventStream();
+}
+
+// Follow a running task: SSE push first, 2s polling as fallback (EventSource
+// unavailable, the extension proxy base, or a stream error — e.g. an older
+// console server without the events route).
+function followTask(id) {
+  stopFollowing();
+  if (typeof EventSource === "undefined" || VIA_EXTENSION_PROXY) return startPolling();
+  const es = new EventSource(apiUrl.events(id));
+  state.eventSource = es;
+  es.onmessage = (e) => {
+    const task = JSON.parse(e.data);
+    if (task.id !== state.selectedId) return;
+    renderDetail(task);
+    refreshTaskList();
+    // close before the server's own close lands, so EventSource never retries
+    if (TERMINAL_STATUSES.has(task.status)) stopEventStream();
+  };
+  es.onerror = () => {
+    if (state.eventSource !== es) return; // we closed it ourselves
+    stopEventStream();
+    startPolling();
+  };
 }
 
 function startPolling() {
@@ -221,17 +326,22 @@ async function selectTask(id) {
   const task = await api(apiUrl.task(id));
   renderDetail(task);
   refreshTaskList();
-  if (task.status === "running") startPolling(); else stopPolling();
+  if (task.status === "running") followTask(id); else stopFollowing();
 }
 
 function renderDetail(task) {
+  state.lastTask = task;
   const detail = $("detail");
-  const modeLabel = task.classification
-    ? `auto → ${task.classification.mode} · ${task.classification.reason}`
-    : task.mode;
+  const classificationBanner = task.classification
+    ? `<div class="banner classification">
+        <div><span class="verdict">auto → ${esc(task.classification.mode)}</span>${task.classification.confidence ? ` · ${esc(task.classification.confidence)} confidence` : ""}</div>
+        <div class="muted">${esc(task.classification.reason)}</div>
+      </div>`
+    : "";
   let html = `
     <h2>${esc(task.prompt)}</h2>
-    <div class="muted">${esc(modeLabel)} · ${esc(task.repoPath)} · ${statusBadge(task.status)}</div>
+    <div class="muted">${modeBadge(task)} ${esc(task.repoPath)} · ${statusBadge(task.status)} · ${esc(relativeTime(task.createdAt))}</div>
+    ${classificationBanner}
     ${task.error ? `<div class="error-box">${esc(task.error)}</div>` : ""}`;
 
   if (task.status === "running") {
@@ -253,6 +363,15 @@ function renderDetail(task) {
       $(`pick-${pick}`).addEventListener("click", () => applyPick(task.id, pick));
     }
   }
+
+  for (const el of detail.querySelectorAll(".diff-toggle")) {
+    el.addEventListener("click", () => {
+      const key = el.dataset.diffKey;
+      if (state.expandedDiffs.has(key)) state.expandedDiffs.delete(key);
+      else state.expandedDiffs.add(key);
+      if (state.lastTask) renderDetail(state.lastTask);
+    });
+  }
 }
 
 function renderCompete(task) {
@@ -270,7 +389,7 @@ function renderCompete(task) {
       <header><h3>Lane ${esc(l.lane)}</h3>${outcomeBadge(l.outcome)}</header>
       <div class="body">
         <p>${esc(l.summary || "(no summary)")}</p>
-        ${l.diff ? `<pre>${esc(l.diff)}</pre>` : `<p class="muted">(no changes)</p>`}
+        ${l.diff ? renderDiff(l.diff, `${task.id}:lane-${l.lane}`) : `<p class="muted">(no changes)</p>`}
       </div>
     </div>`).join("") + `</div>`;
   if (task.status === "awaiting_pick") {
@@ -299,7 +418,7 @@ function renderCascade(task) {
       <header><h3>Winner — level ${esc(task.winner.level)} (${esc(task.winner.cli)})</h3></header>
       <div class="body">
         <p>${esc(task.winner.summary || "(no summary)")}</p>
-        ${task.winner.diff ? `<pre>${esc(task.winner.diff)}</pre>` : `<p class="muted">(no changes)</p>`}
+        ${task.winner.diff ? renderDiff(task.winner.diff, `${task.id}:winner`) : `<p class="muted">(no changes)</p>`}
       </div>
     </div></div>`;
   } else {
@@ -334,6 +453,7 @@ function renderBrainstorm(task) {
 }
 
 async function applyPick(id, pick) {
+  stopFollowing(); // the pick resolves the task; no more progress to follow
   try {
     const task = await api(apiUrl.pick(id), {
       method: "POST",
@@ -351,13 +471,16 @@ async function applyPick(id, pick) {
 
 function setMode(mode) {
   state.mode = mode;
+  $("mode-auto").classList.toggle("active", mode === "auto");
   $("mode-compete").classList.toggle("active", mode === "compete");
   $("mode-brainstorm").classList.toggle("active", mode === "brainstorm");
   $("mode-cascade").classList.toggle("active", mode === "cascade");
-  // brainstorm needs no git repo; compete and cascade both run in worktrees of one
+  // brainstorm needs no git repo; compete and cascade both run in worktrees of
+  // one; auto may route anywhere, so keep the field (ignored on brainstorm)
   $("repo-path").style.display = mode === "brainstorm" ? "none" : "";
 }
 
+$("mode-auto").addEventListener("click", () => setMode("auto"));
 $("mode-compete").addEventListener("click", () => setMode("compete"));
 $("mode-brainstorm").addEventListener("click", () => setMode("brainstorm"));
 $("mode-cascade").addEventListener("click", () => setMode("cascade"));
@@ -384,7 +507,7 @@ $("run-form").addEventListener("submit", async (e) => {
   }
 });
 
-setMode("compete");
+setMode("auto");
 refreshTaskList();
 </script>
 </body>
