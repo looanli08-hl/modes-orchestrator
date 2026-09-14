@@ -174,3 +174,11 @@ bun run dev
 - [x] **壳补丁 #2**：`/modes` 全尺寸页面（`pages/modes/ModesPage.tsx`，复用扩展资产 iframe，摆脱设置页写死高度），侧边栏入口改指 /modes；计划外发现：上游 resolveFeedbackModule 测试要求每条路由登记 feedback module（已登记，入册）
 - [x] **面板产品化**：auto 默认居首（分类横幅显著展示）；SSE `/api/tasks/:id/events` 替代轮询（EventSource 不能发 header 故开 `?token=`，轮询留作回退）；diff 高亮 + 超 200 行折叠；任务列表模式/状态徽章 + 相对时间
 - 测试 277 全绿；两条线文件零冲突并行完成
+
+## Day 2 续 4 — roundtable（圆桌）：多 CLI 真协作模式
+
+- [x] **产品定位确认**（用户）：差异化 = "CLI 选择器变团队组建"——Orca/AionUi 多选也是各干各的，我们要交叉可见的协作
+- [x] `patterns/roundtable.ts`：第 1 轮并行独立作答 → 共识评审（CONSENSUS 标记，缺失/畸形 = NO 不伪造）→ 非共识则第 2 轮交叉可见修订 → 综合。单 lane 失败降级；两轮全灭的各档诚实路径齐全
+- [x] console/panel 接入：CLI 多选 chips（/api/clis PATH 探测 + 缓存），clis→各模式 lanes/chain 映射在 server 端；roundtable 轮次分组视图 + 共识横幅
+- [x] 真实验证两条诚实路径都见过：eval 里非共识两轮辩论完整链（6 事件）；面板冒烟里第 1 轮达成共识早停
+- 测试 303 全绿。设计注记：attempt_seq 未进 JSONL schema（轮次编码在 attempt_id），提为一等字段需 spec §5 变更，留 backlog；roundtable 未进 auto 路由（显式选择），留 backlog
