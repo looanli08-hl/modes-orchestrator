@@ -1,11 +1,13 @@
 /**
  * modes-run — the MVP as one interactive command (spec-mvp §1 + §2.5).
  *
- * Usage:  bun packages/orchestrator/scripts/modes-run.ts [--mode compete|brainstorm|cascade|auto] "<prompt>" [repoPath]
+ * Usage:  bun packages/orchestrator/scripts/modes-run.ts [--mode compete|brainstorm|cascade|roundtable|auto] "<prompt>" [repoPath]
  *         echo A | bun ...modes-run.ts ...   (piped pick, for testing)
  * compete (default): fan-out → cross-review → show both diffs → you pick → merge.
  *   repoPath defaults to the current directory (must be a git repo).
  * brainstorm: N lanes answer in parallel → synthesis of the diversity. No pick, no merge.
+ * roundtable: N CLIs answer, a reviewer judges consensus, non-consensus → a revision
+ *   round where lanes see each other's answers, then synthesis. No pick, no merge.
  * cascade: cheap CLI first, escalate on failure or empty diff → winner diff → merge or not.
  * auto: the router classifies the prompt (classification printed first), then the
  *   resolved mode runs with its usual lanes/chain and the exact same display + gate.
@@ -19,6 +21,7 @@ import { recordUserPick } from '../src/gate/recordUserPick';
 import type { UserPick } from '../src/gate/userGate';
 import { runBrainstorm, type BrainstormResult } from '../src/patterns/brainstorm';
 import { runCascade, type CascadeResult } from '../src/patterns/cascade';
+import { runRoundtable, type RoundtableResult } from '../src/patterns/roundtable';
 import { classifyTask } from '../src/router/classifyTask';
 import { runRouted } from '../src/router/runRouted';
 import { runTask, type RunTaskResult } from '../src/run/runTask';
@@ -30,6 +33,21 @@ function presentBrainstormResult(result: BrainstormResult): void {
   }
   console.log(`\n──── SYNTHESIS ────`);
   console.log(result.synthesis ?? '(skipped — all lanes failed)');
+  console.log(`\nevents: ${result.eventsFile}`);
+}
+
+function presentRoundtableResult(result: RoundtableResult): void {
+  console.log(`task: ${result.taskId}`);
+  for (const round of result.rounds) {
+    console.log(`\n════ ROUND ${round.round} ════`);
+    for (const lane of round.lanes) {
+      console.log(`\n──── ${lane.cli} (${lane.outcome}) ────`);
+      console.log(lane.answer.slice(0, 1500));
+    }
+  }
+  console.log(`\nconsensus after round 1: ${result.consensus ? 'YES — early stop, round 2 skipped' : 'NO'}`);
+  console.log(`\n──── SYNTHESIS ────`);
+  console.log(result.synthesis ?? '(skipped — all round-1 lanes failed)');
   console.log(`\nevents: ${result.eventsFile}`);
 }
 
@@ -126,8 +144,8 @@ const mode = modeFlagIndex >= 0 ? args[modeFlagIndex + 1] : 'compete';
 if (modeFlagIndex >= 0) args.splice(modeFlagIndex, 2);
 
 const prompt = args[0];
-if (!prompt || (mode !== 'compete' && mode !== 'brainstorm' && mode !== 'cascade' && mode !== 'auto')) {
-  console.error('usage: bun modes-run.ts [--mode compete|brainstorm|cascade|auto] "<prompt>" [repoPath]');
+if (!prompt || (mode !== 'compete' && mode !== 'brainstorm' && mode !== 'cascade' && mode !== 'auto' && mode !== 'roundtable')) {
+  console.error('usage: bun modes-run.ts [--mode compete|brainstorm|cascade|roundtable|auto] "<prompt>" [repoPath]');
   process.exit(2);
 }
 const repoPath = path.resolve(args[1] ?? process.cwd());
@@ -166,6 +184,20 @@ if (mode === 'brainstorm') {
   });
 
   presentBrainstormResult(result);
+  process.exit(0);
+}
+
+if (mode === 'roundtable') {
+  console.log(`prompt: ${prompt}`);
+  console.log('roundtable with kimi + qwen (up to 2 rounds, early stop on consensus) …\n');
+
+  const result = await runRoundtable({
+    prompt,
+    clis: ['kimi', 'qwen'],
+    workDir: repoPath,
+  });
+
+  presentRoundtableResult(result);
   process.exit(0);
 }
 

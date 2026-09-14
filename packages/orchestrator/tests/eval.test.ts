@@ -19,6 +19,7 @@ import { checkExpectations, decidePick, runEval, type EvalDeps, type ScenarioRes
 import { EVAL_SCENARIOS, selectScenarios, type EvalScenario } from '../src/eval/scenarios';
 import { recordUserPick } from '../src/gate/recordUserPick';
 import type { CascadeResult } from '../src/patterns/cascade';
+import type { RoundtableResult } from '../src/patterns/roundtable';
 import type { RunTaskResult } from '../src/run/runTask';
 import { EVENT_LOG_SCHEMA_VERSION, type EventLogRole } from '../src/schema/eventLog';
 import { appendEvent, readEvents } from '../src/store/eventLogStore';
@@ -140,6 +141,39 @@ function makeFakeRunCascade(config: {
   };
 }
 
+/** fake runRoundtable: records worker/reviewer/synthesizer events into a real JSONL log, returns scripted rounds */
+function makeFakeRunRoundtable(config: {
+  consensus: boolean;
+  synthesis: string | null;
+}): EvalDeps['runRoundtable'] {
+  return async (options) => {
+    const taskId = 'task-fake';
+    const eventsFile = path.join(options.workDir, '.modes', 'events.jsonl');
+    const lanes: RoundtableResult['rounds'][number]['lanes'] = [];
+    for (const cli of options.clis) {
+      // oxlint-disable-next-line no-await-in-loop -- append-only log: writes must stay ordered
+      await appendFakeEvent(eventsFile, taskId, cli, 'worker', 'success');
+      lanes.push({ cli, outcome: 'success', answer: `${cli} answer` });
+    }
+    const rounds: RoundtableResult['rounds'] = [{ round: 1, lanes }];
+    if (!config.consensus) {
+      await appendFakeEvent(eventsFile, taskId, 'consensus', 'reviewer', 'success');
+      const revised = lanes.map((l) => Object.assign({}, l, { answer: `${l.cli} revised` }));
+      for (const l of revised) {
+        // oxlint-disable-next-line no-await-in-loop -- append-only log: writes must stay ordered
+        await appendFakeEvent(eventsFile, taskId, l.cli, 'worker', 'success');
+      }
+      rounds.push({ round: 2, lanes: revised });
+    } else {
+      await appendFakeEvent(eventsFile, taskId, 'consensus', 'reviewer', 'success');
+    }
+    if (config.synthesis !== null) {
+      await appendFakeEvent(eventsFile, taskId, 'synthesis', 'synthesizer', 'success');
+    }
+    return { taskId, rounds, consensus: config.consensus, synthesis: config.synthesis, eventsFile };
+  };
+}
+
 /** fake mergeLane: simulates the real merge by landing its exact commit subject */
 const fakeMergeLane: EvalDeps['mergeLane'] = async ({ repoPath, taskId, pick }) => {
   await execFileAsync(
@@ -154,6 +188,7 @@ function makeDeps(overrides: Partial<EvalDeps> = {}): EvalDeps {
     runTask: makeFakeRunTask({ outcomes: { A: 'success', B: 'success' } }),
     runBrainstorm: makeFakeRunBrainstorm({ outcomes: { A: 'success', B: 'success' }, synthesis: 'combined' }),
     runCascade: makeFakeRunCascade({ attempts: [{ cli: 'cheap', outcome: 'success' }], winnerLevel: 1 }),
+    runRoundtable: makeFakeRunRoundtable({ consensus: false, synthesis: 'combined' }),
     recordPick: recordUserPick,
     mergeLane: fakeMergeLane,
     ...overrides,
@@ -191,6 +226,14 @@ const AUTO: EvalScenario = {
   tier: 'core',
   prompt: 'Create a file util.js with a clamp function',
   expect: { expectMode: 'cascade', expectWinnerLevel: 1, expectAttempts: 1 },
+};
+
+const ROUNDTABLE: EvalScenario = {
+  id: 'fake-roundtable',
+  mode: 'roundtable',
+  tier: 'core',
+  prompt: 'debate something',
+  expect: { minLaneSuccess: 2, minRounds: 1, expectSynthesis: true, expectRoles: ['worker', 'reviewer', 'synthesizer'] },
 };
 
 describe('decidePick', () => {
@@ -478,6 +521,48 @@ describe('runEval', () => {
     expect(results[0].pass).toBe(false);
     expect(results[0].failures.some((f) => f.includes('brainstorm') && f.includes('cascade'))).toBe(true);
   });
+
+  it('roundtable happy path: rounds, synthesis, and worker/reviewer/synthesizer roles', async () => {
+    const results = await runEval([ROUNDTABLE], makeDeps());
+    trackTempDir(results);
+
+    const r = results[0];
+    expect(r.pass).toBe(true);
+    expect(r.eventCount).toBe(6); // 2 workers r1 + reviewer + 2 workers r2 + synthesizer
+    expect(r.laneOutcomes).toEqual({ 'r1:kimi': 'success', 'r1:qwen': 'success', 'r2:kimi': 'success', 'r2:qwen': 'success' });
+  });
+
+  it('roundtable: missing synthesis or missing roles fail readably', async () => {
+    const noSynthesis = await runEval(
+      [ROUNDTABLE],
+      makeDeps({ runRoundtable: makeFakeRunRoundtable({ consensus: true, synthesis: null }) })
+    );
+    trackTempDir(noSynthesis);
+    expect(noSynthesis[0].pass).toBe(false);
+    expect(noSynthesis[0].failures.some((f) => f.includes('synthesis'))).toBe(true);
+    expect(noSynthesis[0].failures.some((f) => f.includes('"synthesizer" role'))).toBe(true);
+  });
+});
+
+describe('checkExpectations: roundtable (minRounds / expectRoles)', () => {
+  it('passes when rounds and roles are present', () => {
+    const obs = {
+      laneSuccesses: 2,
+      hasReview: true,
+      hasSynthesis: true,
+      roundCount: 2,
+      roles: ['worker', 'reviewer', 'synthesizer'],
+    };
+    expect(checkExpectations(ROUNDTABLE, obs)).toEqual([]);
+  });
+
+  it('fails below minRounds and on a missing role', () => {
+    const obs = { laneSuccesses: 2, hasReview: false, hasSynthesis: true, roundCount: 0, roles: ['worker'] };
+    const failures = checkExpectations(ROUNDTABLE, obs);
+    expect(failures.some((f) => f.includes('>= 1 round(s)'))).toBe(true);
+    expect(failures.some((f) => f.includes('"reviewer" role'))).toBe(true);
+    expect(failures.some((f) => f.includes('"synthesizer" role'))).toBe(true);
+  });
 });
 
 describe('checkExpectations: expectWinner', () => {
@@ -545,7 +630,7 @@ describe('EVAL_SCENARIOS definitions', () => {
   it('every scenario has a valid tier, mode, non-empty prompt and at least one expectation', () => {
     for (const s of EVAL_SCENARIOS) {
       expect(['core', 'extended']).toContain(s.tier);
-      expect(['compete', 'brainstorm', 'cascade', 'auto']).toContain(s.mode);
+      expect(['compete', 'brainstorm', 'cascade', 'auto', 'roundtable']).toContain(s.mode);
       expect(s.prompt.trim().length).toBeGreaterThan(0);
       expect(Object.keys(s.expect).length).toBeGreaterThan(0);
     }

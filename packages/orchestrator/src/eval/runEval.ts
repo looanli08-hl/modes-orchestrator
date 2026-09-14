@@ -18,6 +18,7 @@ import type { RecordUserPickOptions } from '../gate/recordUserPick';
 import type { UserPick } from '../gate/userGate';
 import type { BrainstormOptions, BrainstormResult } from '../patterns/brainstorm';
 import type { CascadeOptions, CascadeResult } from '../patterns/cascade';
+import type { RoundtableOptions, RoundtableResult } from '../patterns/roundtable';
 import { runRouted } from '../router/runRouted';
 import type { RunTaskOptions, RunTaskResult } from '../run/runTask';
 import { readEvents } from '../store/eventLogStore';
@@ -34,10 +35,14 @@ export const EVAL_LANES = [
 /** the eval cascade chain: cheapest first */
 export const EVAL_CHAIN = [{ cli: 'qwen' }, { cli: 'kimi' }];
 
+/** the eval roundtable seats the same two real CLIs */
+export const EVAL_CLIS = ['kimi', 'qwen'];
+
 export interface EvalDeps {
   runTask: (options: RunTaskOptions) => Promise<RunTaskResult>;
   runBrainstorm: (options: BrainstormOptions) => Promise<BrainstormResult>;
   runCascade: (options: CascadeOptions) => Promise<CascadeResult>;
+  runRoundtable: (options: RoundtableOptions) => Promise<RoundtableResult>;
   recordPick: (eventsFile: string, options: RecordUserPickOptions) => Promise<void>;
   mergeLane: (options: MergeLaneOptions) => Promise<void>;
 }
@@ -98,6 +103,10 @@ interface Observation {
   attemptCount?: number;
   /** auto: the mode the router resolved the prompt to */
   resolvedMode?: string;
+  /** roundtable: how many rounds completed */
+  roundCount?: number;
+  /** roundtable: the roles present in the event stream */
+  roles?: string[];
 }
 
 export function checkExpectations(scenario: EvalScenario, obs: Observation): string[] {
@@ -111,9 +120,19 @@ export function checkExpectations(scenario: EvalScenario, obs: Observation): str
     expectAttempts,
     expectWinner,
     expectMode,
+    minRounds,
+    expectRoles,
   } = scenario.expect;
   if (expectMode !== undefined && obs.resolvedMode !== expectMode) {
     failures.push(`expected the router to resolve mode "${expectMode}", got "${obs.resolvedMode ?? 'unknown'}"`);
+  }
+  if (minRounds !== undefined && (obs.roundCount ?? 0) < minRounds) {
+    failures.push(`expected >= ${minRounds} round(s), got ${obs.roundCount ?? 'unknown'}`);
+  }
+  for (const role of expectRoles ?? []) {
+    if (!obs.roles?.includes(role)) {
+      failures.push(`expected a "${role}" role in the event stream, got [${(obs.roles ?? []).join(', ')}]`);
+    }
   }
   if (minLaneSuccess !== undefined && obs.laneSuccesses < minLaneSuccess) {
     failures.push(`expected >= ${minLaneSuccess} successful lane(s), got ${obs.laneSuccesses}`);
@@ -302,6 +321,47 @@ async function runBrainstormScenario(
   };
 }
 
+async function runRoundtableScenario(
+  scenario: EvalScenario,
+  deps: EvalDeps,
+  failures: string[]
+): Promise<ScenarioResult> {
+  const workDir = await mkdtemp(path.join(os.tmpdir(), `modes-eval-${scenario.id}-`));
+
+  const result = await deps.runRoundtable({
+    prompt: scenario.prompt,
+    clis: scenario.clis ?? EVAL_CLIS,
+    synthesizerCli: 'kimi',
+    workDir,
+    taskType: `eval:${scenario.id}`,
+  });
+
+  const events = await readEvents(result.eventsFile);
+  failures.push(
+    ...checkExpectations(scenario, {
+      laneSuccesses: result.rounds[0]?.lanes.filter((l) => l.outcome === 'success').length ?? 0,
+      hasReview: events.some((e) => e.role === 'reviewer'),
+      hasSynthesis: result.synthesis !== null,
+      roundCount: result.rounds.length,
+      roles: [...new Set(events.map((e) => e.role))],
+    })
+  );
+
+  const stats = await collectEventStats(result.eventsFile);
+  return {
+    scenarioId: scenario.id,
+    pass: failures.length === 0,
+    failures,
+    durationMs: 0, // filled in by runScenario
+    eventsFile: result.eventsFile,
+    workDir,
+    laneOutcomes: Object.fromEntries(
+      result.rounds.flatMap((r) => r.lanes.map((l) => [`r${r.round}:${l.cli}`, l.outcome]))
+    ),
+    ...stats,
+  };
+}
+
 async function runCascadeScenario(scenario: EvalScenario, deps: EvalDeps, failures: string[]): Promise<ScenarioResult> {
   const workDir = await mkdtemp(path.join(os.tmpdir(), `modes-eval-${scenario.id}-`));
   await seedRepo(workDir, scenario.seedFiles);
@@ -455,7 +515,9 @@ async function runScenario(scenario: EvalScenario, deps: EvalDeps, options?: Run
           ? await runBrainstormScenario(scenario, deps, failures)
           : scenario.mode === 'auto'
             ? await runAutoScenario(scenario, deps, failures)
-            : await runCascadeScenario(scenario, deps, failures);
+            : scenario.mode === 'roundtable'
+              ? await runRoundtableScenario(scenario, deps, failures)
+              : await runCascadeScenario(scenario, deps, failures);
     result.durationMs = Date.now() - started;
     result.pass = result.failures.length === 0;
     if (options?.eventsDir) {

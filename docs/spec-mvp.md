@@ -33,6 +33,7 @@
 |---|---|---|---|
 | `compete`（默认，已实现） | 产出型任务（写代码/写文档） | 2 路 fan-out → 交叉评审（VERDICT + PICK）→ 人挑一稿合并 | 最终拍板 |
 | `brainstorm`（已实现） | 思考型任务（想方案/比思路） | N 路 fan-out（无 worktree、无合并）→ 一路综合多样性 → 呈现全集 + 综合 | 只看不动手 |
+| `roundtable`（已实现） | 思考型任务（真协作：多 CLI 多轮交叉可见） | 第 1 轮 N 路并行作答 → 评审判实质共识（`CONSENSUS: YES/NO`，缺标记视为 NO 不伪造）→ YES 早停；NO 则第 2 轮互见答案、互评修订 → 综合最后一轮（末轮全灭退回第 1 轮答案；首轮全灭不评审不综合） | 只看不动手 |
 | `solo` | 快速问答 | 单路直出 | — |
 | `cascade`（已实现） | 省钱优先 | 串行降级链：便宜先上，仅客观信号升级（outcome ≠ success 或 success 但零 diff），直到某级"成功且非空 diff"或链耗尽 → 人决定 merge 或不要 | 最终拍板 |
 | `auto`（已实现） | 调用方不确定该用哪个模式 | 规则路由 v1：启发式分类 prompt（compete > brainstorm > cascade，交付物名词压制 brainstorm，无信号兜底 cascade）→ 按 resolved 模式执行；路由决策落 JSONL（task_type=auto:<模式>）。数据攒够后换数据驱动 | 同 resolved 模式 |

@@ -22,6 +22,7 @@ import { mergeLane } from '../src/gate/mergeLane';
 import { recordUserPick } from '../src/gate/recordUserPick';
 import { runBrainstorm } from '../src/patterns/brainstorm';
 import { runCascade } from '../src/patterns/cascade';
+import { runRoundtable } from '../src/patterns/roundtable';
 import { runTask } from '../src/run/runTask';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +43,11 @@ if (scenarios.length === 0) {
 const scope = ids.length > 0 ? 'selected ids' : all ? 'all tiers' : 'core tier';
 console.log(`modes-eval: ${scenarios.length} scenario(s) (${scope}), real CLIs (lanes kimi+qwen, reviewer/synthesizer kimi)\n`);
 
-const results = await runEval(scenarios, { runTask, runBrainstorm, runCascade, recordPick: recordUserPick, mergeLane }, { eventsDir });
+const results = await runEval(
+  scenarios,
+  { runTask, runBrainstorm, runCascade, runRoundtable, recordPick: recordUserPick, mergeLane },
+  { eventsDir }
+);
 
 function formatRow(r: ScenarioResult): string {
   const status = r.pass ? 'PASS' : 'FAIL';

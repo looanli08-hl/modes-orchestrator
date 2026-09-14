@@ -41,11 +41,15 @@ export interface EvalExpectation {
   expectWinner?: boolean;
   /** auto: the router must classify the prompt as exactly this mode */
   expectMode?: RoutedMode;
+  /** roundtable: at least this many rounds must have completed */
+  minRounds?: number;
+  /** roundtable: the event stream must contain each of these roles */
+  expectRoles?: string[];
 }
 
 export interface EvalScenario {
   id: string;
-  mode: 'compete' | 'brainstorm' | 'cascade' | 'auto';
+  mode: 'compete' | 'brainstorm' | 'cascade' | 'auto' | 'roundtable';
   tier: 'core' | 'extended';
   prompt: string;
   /** files to seed into the temp git repo before running (compete, cascade) */
@@ -54,6 +58,8 @@ export interface EvalScenario {
   lanes?: { lane: string; cli: string }[];
   /** cascade chain override (cheapest first); defaults to EVAL_CHAIN (qwen → kimi) in runEval */
   chain?: { cli: string; timeoutMs?: number }[];
+  /** roundtable participant override; defaults to EVAL_CLIS (kimi + qwen) in runEval */
+  clis?: string[];
   expect: EvalExpectation;
 }
 
@@ -150,6 +156,19 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
     // first try: the chain must stop at level 1 without spending kimi quota.
     prompt: 'Create a file named hello.txt containing exactly one line of text.',
     expect: { expectWinnerLevel: 1, expectAttempts: 1 },
+  },
+  {
+    id: 'roundtable-basic',
+    mode: 'roundtable',
+    tier: 'core',
+    // A genuine trade-off question so the two lanes have something to debate. Whether
+    // the reviewer sees consensus after round 1 is real-model behavior and is never
+    // asserted — only that the pipeline ran: >= 1 round, both lanes up, a synthesis,
+    // and the worker/reviewer/synthesizer roles present in the event stream.
+    prompt:
+      'Should a CLI orchestrator for parallel AI agents store its orchestration event log as JSONL or SQLite? ' +
+      'Give a recommendation with the two strongest reasons.',
+    expect: { minLaneSuccess: 2, minRounds: 1, expectSynthesis: true, expectRoles: ['worker', 'reviewer', 'synthesizer'] },
   },
   {
     id: 'auto-exec',
