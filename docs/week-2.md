@@ -160,3 +160,11 @@ bun run dev
 ### nightly 04:17 首火结果：17/23（风暴日基线）
 
 6 个失败与 core 跑同因：qwen 超时（simple-create/modify-existing/impossible-task/brainstorm-basic/four-lane）+ cascade-basic 再次走真实升级路径（level 2 胜）。全部 10 个 extended 任务类型场景通过。风暴日基线确立：失败指纹 = qwen timeout；健康日应以全绿为基线。
+
+## Day 2 续 2 — 界面先行（首个壳补丁）+ modes-report 数据闭环
+
+- [x] **push 备份**：modes/main 首次推上 origin（此前全在本地）
+- [x] **宪法第 3 条受控例外**（用户拍板"界面先行"）：壳补丁登记册 `docs/shell-patches.md`；补丁 #1 = 主侧边栏 "modes" 入口（定时任务下方，直达扩展面板页）。tsc 干净、renderer lint 基线不变、83 相关测试过、HMR 实测生效
+- [x] **事件留存堵洞**：场景事件流快照进 `evals/events/`（此前 $TMPDIR 一清就蒸发）
+- [x] **modes-report 报表**：场景通过率/耗时、模型 outcome 分布、评审 pick 统计、cascade 早停率、degraded run 标注。首跑真实数据即出洞察：**cascade 早停率 61.5%**（省钱率）、**评审 5 次 pick 里 4 次选 kimi**、三次风暴夜全部正确标 degraded
+- 测试总数 273 全绿；最新 core 跑 8/8（qwen 从风暴恢复）
