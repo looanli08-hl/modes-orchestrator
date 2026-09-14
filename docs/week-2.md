@@ -168,3 +168,9 @@ bun run dev
 - [x] **事件留存堵洞**：场景事件流快照进 `evals/events/`（此前 $TMPDIR 一清就蒸发）
 - [x] **modes-report 报表**：场景通过率/耗时、模型 outcome 分布、评审 pick 统计、cascade 早停率、degraded run 标注。首跑真实数据即出洞察：**cascade 早停率 61.5%**（省钱率）、**评审 5 次 pick 里 4 次选 kimi**、三次风暴夜全部正确标 degraded
 - 测试总数 273 全绿；最新 core 跑 8/8（qwen 从风暴恢复）
+
+## Day 2 续 3 — 界面先行：/modes 一等页面 + 面板产品化（并行两线）
+
+- [x] **壳补丁 #2**：`/modes` 全尺寸页面（`pages/modes/ModesPage.tsx`，复用扩展资产 iframe，摆脱设置页写死高度），侧边栏入口改指 /modes；计划外发现：上游 resolveFeedbackModule 测试要求每条路由登记 feedback module（已登记，入册）
+- [x] **面板产品化**：auto 默认居首（分类横幅显著展示）；SSE `/api/tasks/:id/events` 替代轮询（EventSource 不能发 header 故开 `?token=`，轮询留作回退）；diff 高亮 + 超 200 行折叠；任务列表模式/状态徽章 + 相对时间
+- 测试 277 全绿；两条线文件零冲突并行完成
