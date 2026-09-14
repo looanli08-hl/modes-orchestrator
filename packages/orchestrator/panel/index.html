@@ -24,6 +24,8 @@
     --add-bg: rgba(26, 127, 55, 0.12);
     --del-fg: #d1242f;
     --del-bg: rgba(209, 36, 47, 0.1);
+    --ask-bg: #ffffff;
+    --ask-shadow: 0 1px 2px rgba(27, 31, 36, 0.05), 0 8px 24px rgba(27, 31, 36, 0.06);
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
@@ -45,6 +47,8 @@
       --add-bg: rgba(63, 185, 80, 0.15);
       --del-fg: #f85149;
       --del-bg: rgba(248, 81, 73, 0.15);
+      --ask-bg: #161b22;
+      --ask-shadow: 0 1px 2px rgba(1, 4, 9, 0.4);
     }
   }
   * { box-sizing: border-box; }
@@ -180,81 +184,43 @@
   .task-body { padding: 24px 32px 64px; max-width: 1080px; }
   .task-body .meta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 4px; }
 
-  /* empty state: mode picker, big ask, team roster */
-  #stage-empty { display: flex; justify-content: center; padding: 10vh 32px 64px; }
-  .empty-inner { width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 28px; }
-  .empty-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--muted); }
-
-  .mode-toggle {
-    display: inline-flex;
-    align-self: flex-start;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 2px;
-    gap: 2px;
-    background: var(--surface);
+  /* empty state: consumer-grade entry — greeting, ask card, team pills */
+  #stage-empty { display: flex; justify-content: center; padding: 12vh 32px 64px; }
+  .empty-inner { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 20px; }
+  .empty-title {
+    margin: 0 0 4px;
+    text-align: center;
+    font-size: 28px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
   }
-  .mode-toggle button {
+
+  /* mode picker demoted to a quiet text link row above the card */
+  .mode-links { text-align: center; font-size: 12px; color: var(--muted); }
+  .mode-links button {
     border: 0;
     background: transparent;
     color: var(--muted);
     font: inherit;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    padding: 5px 10px;
-    border-radius: 4px;
+    padding: 2px 3px;
     cursor: pointer;
   }
-  .mode-toggle button:hover { color: var(--fg); }
-  .mode-toggle button.active { background: var(--accent-soft); color: var(--accent); }
+  .mode-links button:hover { color: var(--fg); }
+  .mode-links button.active { color: var(--accent); font-weight: 600; }
+  .mode-links .sep { opacity: 0.5; }
 
-  form#run-form { display: flex; flex-direction: column; gap: 20px; margin: 0; }
-  textarea#prompt {
-    width: 100%;
-    min-height: 128px;
-    padding: 16px 20px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
-    color: var(--fg);
-    font: inherit;
-    font-size: 20px;
-    line-height: 1.4;
-    resize: vertical;
-  }
-  textarea#prompt:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
-  textarea#prompt::placeholder { color: var(--muted); opacity: 0.75; }
-  input#repo-path {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: transparent;
-    color: var(--fg);
-    font-family: var(--mono);
-    font-size: 12px;
-  }
-  input#repo-path:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  input#repo-path::placeholder { color: var(--muted); font-family: inherit; }
-
-  .roster { display: flex; flex-direction: column; gap: 10px; }
-  .roster .section-label {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    color: var(--muted);
-  }
-  .cli-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  /* team roster: one row of rounded pills, none lit = dispatcher's pick */
+  .roster { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+  .roster .roster-label { font-size: 12px; color: var(--muted); margin-right: 2px; }
+  .cli-chips { display: contents; }
   .cli-chip {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    padding: 4px 12px;
+    padding: 5px 14px;
     border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
+    border-radius: 999px;
+    background: var(--ask-bg);
     color: var(--muted);
     font: inherit;
     font-size: 13px;
@@ -268,20 +234,100 @@
   .chip-dot.ok { background: var(--success); }
   .chip-dot.off { background: var(--muted); opacity: 0.5; }
 
-  button.primary {
-    align-self: flex-start;
-    padding: 8px 24px;
+  form#run-form { display: flex; flex-direction: column; gap: 12px; margin: 4px 0 0; }
+
+  /* the ask card: one soft rounded surface, accent ring on focus */
+  .ask-card {
+    background: var(--ask-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--ask-shadow);
+    overflow: hidden;
+  }
+  .ask-card:focus-within {
+    border-color: var(--accent);
+    box-shadow: var(--ask-shadow), 0 0 0 1px var(--accent);
+  }
+  textarea#prompt {
+    width: 100%;
+    min-height: 64px;
+    padding: 16px 18px 4px;
     border: 0;
-    border-radius: 6px;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 16px;
+    line-height: 1.5;
+    resize: vertical;
+  }
+  textarea#prompt:focus { outline: none; }
+  textarea#prompt::placeholder { color: var(--muted); opacity: 0.8; }
+  .ask-bar { display: flex; align-items: center; justify-content: flex-end; padding: 8px 12px 12px; }
+  button.primary {
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
     background: var(--accent);
     color: var(--on-accent);
-    font: inherit;
-    font-size: 14px;
-    font-weight: 600;
     cursor: pointer;
   }
   button.primary:hover { filter: brightness(1.1); }
   button.primary:disabled { opacity: 0.5; cursor: default; }
+  button.primary svg { display: block; }
+
+  /* "在项目中工作" chip: collapsed by default, reveals the repo path input */
+  .repo-wrap { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  .repo-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--ask-bg);
+    color: var(--muted);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .repo-chip:hover { border-color: var(--accent); color: var(--fg); }
+  .repo-chip.open { color: var(--fg); border-color: var(--accent); }
+  .repo-chip svg { display: block; }
+  .repo-row { width: 100%; }
+  .repo-row[hidden] { display: none; }
+  input#repo-path {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--ask-bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  input#repo-path:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  input#repo-path::placeholder { color: var(--muted); font-family: inherit; }
+
+  /* "试试这些指令" — clickable starter prompts */
+  .suggestions { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+  .suggestions .sugg-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .suggestion {
+    align-self: flex-start;
+    border: 0;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 13px;
+    padding: 5px 0;
+    cursor: pointer;
+    text-align: left;
+  }
+  .suggestion:hover { color: var(--accent); }
 
   /* --- badges ------------------------------------------------------------ */
   .badge {
@@ -490,24 +536,34 @@
   <main>
     <section id="stage-empty">
       <div class="empty-inner">
-        <span class="empty-kicker">modes — AI team dispatch</span>
-        <div class="mode-toggle">
-          <button type="button" id="mode-auto" class="active">auto</button>
-          <button type="button" id="mode-single">single</button>
-          <button type="button" id="mode-compete">compete</button>
-          <button type="button" id="mode-brainstorm">brainstorm</button>
-          <button type="button" id="mode-cascade">cascade</button>
-          <button type="button" id="mode-roundtable">roundtable</button>
+        <h1 class="empty-title">今天让团队做点什么？</h1>
+        <div class="roster">
+          <span class="roster-label" id="roster-label">团队：自动搭配</span>
+          <div class="cli-chips" id="cli-chips"></div>
+        </div>
+        <div class="mode-links">
+          <button type="button" id="mode-auto" class="active">统筹(自动)</button><span class="sep"> · </span><button type="button" id="mode-single">单人</button><span class="sep"> · </span><button type="button" id="mode-compete">竞赛</button><span class="sep"> · </span><button type="button" id="mode-brainstorm">脑暴</button><span class="sep"> · </span><button type="button" id="mode-cascade">接力</button><span class="sep"> · </span><button type="button" id="mode-roundtable">圆桌</button>
         </div>
         <form id="run-form">
-          <textarea id="prompt" placeholder="Give the team a task…" required></textarea>
-          <input type="text" id="repo-path" placeholder="Repo path (must be a git repo); empty = cwd of the console" />
-          <div class="roster">
-            <span class="section-label">Team — light the CLIs you want on this</span>
-            <div class="cli-chips" id="cli-chips"></div>
+          <div class="ask-card">
+            <textarea id="prompt" placeholder="给团队派个任务…" required></textarea>
+            <div class="ask-bar">
+              <button class="primary" id="run-btn" type="submit" title="派出任务" aria-label="派出任务"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M8 3L3.5 7.5M8 3l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            </div>
           </div>
-          <button class="primary" id="run-btn" type="submit">Dispatch</button>
+          <div class="repo-wrap" id="repo-wrap">
+            <button type="button" class="repo-chip" id="repo-chip" aria-expanded="false"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M1.5 3.5a1 1 0 0 1 1-1h3l1.5 2h6.5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-9Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>在项目中工作</button>
+            <div class="repo-row" id="repo-row" hidden>
+              <input type="text" id="repo-path" placeholder="项目路径（必须是 git 仓库）；留空 = console 当前目录" />
+            </div>
+          </div>
         </form>
+        <div class="suggestions">
+          <span class="sugg-label">试试这些指令</span>
+          <button type="button" class="suggestion">给我解释一下这个项目是做什么的，从哪里入手</button>
+          <button type="button" class="suggestion">找出这个仓库里最值得重构的三个地方，给出理由</button>
+          <button type="button" class="suggestion">为这个项目的 README 写一段更有吸引力的开头</button>
+        </div>
       </div>
     </section>
     <section id="detail" hidden></section>
@@ -549,7 +605,8 @@ const TERMINAL_STATUSES = new Set(["awaiting_pick", "done", "failed"]);
 
 // CLI chips: the core interaction — 点亮几个 CLI = 雇几个员工协作. The list
 // comes from GET /api/clis (server probes PATH); unavailable CLIs render grey.
-const DEFAULT_LIT_CLIS = ["kimi", "qwen"];
+// Nothing lit by default: an empty selection means "团队：自动搭配" — the
+// dispatcher picks the team (no clis field is sent, same as before).
 const FALLBACK_CLIS = ["kimi", "qwen", "iflow", "claude", "codex"].map((name) => ({ name, available: true }));
 
 const state = {
@@ -699,11 +756,15 @@ function showEmpty() {
 
 function renderCliChips() {
   const box = $("cli-chips");
+  // none lit = the dispatcher assembles the team; lit chips = hand-picked
+  $("roster-label").textContent = state.selectedClis.size
+    ? `团队：${[...state.selectedClis].join(" · ")}`
+    : "团队：自动搭配";
   if (!state.clis.length) { box.innerHTML = ""; return; }
   box.innerHTML = state.clis.map((c) => {
     const on = state.selectedClis.has(c.name);
     const disabled = c.available ? "" : "disabled";
-    const title = c.available ? (on ? "lit — click to dismiss" : "click to hire") : "not installed / unavailable";
+    const title = c.available ? (on ? "已点亮 — 点击撤下" : "点击点亮，加入团队") : "未安装 / 不可用";
     return `<button type="button" class="cli-chip ${on ? "on" : ""}" data-cli="${esc(c.name)}" ${disabled} title="${esc(title)}">` +
       `<span class="chip-dot ${c.available ? "ok" : "off"}"></span>${esc(c.name)}</button>`;
   }).join("");
@@ -722,15 +783,6 @@ async function loadClis() {
     state.clis = await api(apiUrl.clis());
   } catch {
     state.clis = FALLBACK_CLIS; // older server or the extension proxy: no probe route
-  }
-  for (const name of DEFAULT_LIT_CLIS) {
-    const cli = state.clis.find((c) => c.name === name);
-    if (cli?.available) state.selectedClis.add(name);
-  }
-  // never start with an empty table when something usable is installed
-  if (state.selectedClis.size === 0) {
-    const first = state.clis.find((c) => c.available);
-    if (first) state.selectedClis.add(first.name);
   }
   renderCliChips();
 }
@@ -1061,8 +1113,8 @@ function setMode(mode) {
   }
   // brainstorm and roundtable need no git repo (thinking, not commits); compete,
   // cascade and single run in worktrees of one; auto may route anywhere, so keep
-  // the field (ignored on the thinking modes)
-  $("repo-path").style.display = mode === "brainstorm" || mode === "roundtable" ? "none" : "";
+  // the chip (ignored on the thinking modes)
+  $("repo-wrap").style.display = mode === "brainstorm" || mode === "roundtable" ? "none" : "";
 }
 
 for (const m of ["auto", "single", "compete", "brainstorm", "cascade", "roundtable"]) {
@@ -1070,6 +1122,24 @@ for (const m of ["auto", "single", "compete", "brainstorm", "cascade", "roundtab
 }
 
 $("new-task-btn").addEventListener("click", showEmpty);
+
+// "在项目中工作": collapsed by default — a hidden path means the console's cwd
+$("repo-chip").addEventListener("click", () => {
+  const row = $("repo-row");
+  const open = row.hidden;
+  row.hidden = !open;
+  $("repo-chip").classList.toggle("open", open);
+  $("repo-chip").setAttribute("aria-expanded", String(open));
+  if (open) $("repo-path").focus();
+});
+
+// starter prompts fill the ask box, they never dispatch on their own
+for (const el of document.querySelectorAll(".suggestion")) {
+  el.addEventListener("click", () => {
+    $("prompt").value = el.textContent;
+    $("prompt").focus();
+  });
+}
 
 $("run-form").addEventListener("submit", async (e) => {
   e.preventDefault();
