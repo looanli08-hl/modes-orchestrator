@@ -17,7 +17,8 @@ import type { UserPick } from '../gate/userGate';
 import type { ReviewVerdict } from '../review/crossReview';
 import type { TaskClassification } from '../router/classifyTask';
 
-export type ConsoleTaskMode = 'compete' | 'brainstorm' | 'cascade' | 'roundtable';
+/** 'auto' is the provisional mode of a task whose AI dispatch is still in flight; resolveRouting swaps in the real mode */
+export type ConsoleTaskMode = 'single' | 'compete' | 'brainstorm' | 'cascade' | 'roundtable' | 'auto';
 export type ConsoleTaskStatus = 'running' | 'awaiting_pick' | 'done' | 'failed';
 
 export interface CompeteLaneState {
@@ -62,6 +63,16 @@ export interface RoundtableRoundState {
   lanes: RoundtableLaneState[];
 }
 
+export interface SingleLaneState {
+  cli: string;
+  outcome: string;
+  latency: number;
+  summary: string;
+  diff: string;
+  worktreePath: string;
+  branch: string;
+}
+
 export interface ConsoleTask {
   /** console-assigned id — the engine only hands back its taskId when the run finishes */
   id: string;
@@ -80,6 +91,7 @@ export interface ConsoleTask {
   brainstorm: { lanes: BrainstormLaneState[]; synthesis: string | null } | null;
   cascade: { attempts: CascadeAttemptState[]; winner: CascadeWinnerState | null } | null;
   roundtable: { rounds: RoundtableRoundState[]; consensus: boolean; synthesis: string | null } | null;
+  single: { lane: SingleLaneState } | null;
 }
 
 export interface ConsoleTaskSummary {
@@ -123,6 +135,9 @@ export interface TaskRegistry {
       eventsFile: string;
     }
   ): void;
+  completeSingle(id: string, result: { taskId: string; lane: SingleLaneState; eventsFile: string }): void;
+  /** AI dispatch resolved an 'auto' task: swap in the real mode + the routing decision */
+  resolveRouting(id: string, mode: ConsoleTaskMode, classification: TaskClassification): void;
   /** engine threw — terminal state with the message surfaced to the panel */
   fail(id: string, error: unknown): void;
   /** pick applied (recorded + merged, or recorded as "neither") */
@@ -243,6 +258,7 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
         brainstorm: null,
         cascade: null,
         roundtable: null,
+        single: null,
       };
       tasks.set(task.id, task);
       changed(task);
@@ -305,6 +321,24 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
       task.roundtable = { rounds: result.rounds, consensus: result.consensus, synthesis: result.synthesis };
       // thinking produces text, not commits — no gate, no pick (same as brainstorm)
       task.status = 'done';
+      changed(task);
+    },
+
+    completeSingle(id, result) {
+      const task = requireTask(id);
+      task.engineTaskId = result.taskId;
+      task.eventsFile = result.eventsFile;
+      task.single = { lane: result.lane };
+      // one shot, one diff: a successful lane with output leaves the merge decision
+      // to the human; a failure (or a no-change answer) is terminal on its own
+      task.status = result.lane.outcome === 'success' && result.lane.diff.trim() !== '' ? 'awaiting_pick' : 'done';
+      changed(task);
+    },
+
+    resolveRouting(id, mode, classification) {
+      const task = requireTask(id);
+      task.mode = mode;
+      task.classification = classification;
       changed(task);
     },
 

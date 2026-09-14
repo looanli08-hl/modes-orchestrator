@@ -19,7 +19,8 @@ import type { UserPick } from '../gate/userGate';
 import type { BrainstormOptions, BrainstormResult } from '../patterns/brainstorm';
 import type { CascadeOptions, CascadeResult } from '../patterns/cascade';
 import type { RoundtableOptions, RoundtableResult } from '../patterns/roundtable';
-import { runRouted } from '../router/runRouted';
+import type { SingleOptions, SingleResult } from '../patterns/single';
+import { rulesDispatcher, runRouted } from '../router/runRouted';
 import type { RunTaskOptions, RunTaskResult } from '../run/runTask';
 import { readEvents } from '../store/eventLogStore';
 import type { EvalScenario } from './scenarios';
@@ -43,6 +44,7 @@ export interface EvalDeps {
   runBrainstorm: (options: BrainstormOptions) => Promise<BrainstormResult>;
   runCascade: (options: CascadeOptions) => Promise<CascadeResult>;
   runRoundtable: (options: RoundtableOptions) => Promise<RoundtableResult>;
+  runSingle: (options: SingleOptions) => Promise<SingleResult>;
   recordPick: (eventsFile: string, options: RecordUserPickOptions) => Promise<void>;
   mergeLane: (options: MergeLaneOptions) => Promise<void>;
 }
@@ -441,10 +443,76 @@ async function finalizeCascadeScenario(
 }
 
 /**
- * auto: the router (runRouted over the injected engines) classifies the prompt
- * and dispatches; the resolved mode is asserted via expectMode. The only auto
- * scenario today resolves to cascade, so the gate is the cascade one; a
- * non-cascade resolution gets its expectations checked without a gate.
+ * expectations + the human-gate reenactment for auto→single runs: a successful
+ * lane with a non-empty diff is "merge it" (pick 'single'); anything else is
+ * "neither" (single is one shot — no fallback level, nothing fabricated).
+ */
+async function finalizeSingleScenario(
+  scenario: EvalScenario,
+  result: SingleResult,
+  workDir: string,
+  deps: EvalDeps,
+  failures: string[],
+  resolvedMode?: string
+): Promise<ScenarioResult> {
+  const lane = result.lane;
+  const mergeable = lane.outcome === 'success' && lane.diff.trim() !== '';
+  failures.push(
+    ...checkExpectations(scenario, {
+      laneSuccesses: lane.outcome === 'success' ? 1 : 0,
+      hasReview: false,
+      hasSynthesis: null,
+      resolvedMode,
+    })
+  );
+
+  const pick: UserPick = mergeable ? 'single' : 'neither';
+  await deps.recordPick(result.eventsFile, { taskId: result.taskId, pick, reviewVerdict: null });
+
+  if (mergeable) {
+    try {
+      await deps.mergeLane({
+        repoPath: workDir,
+        worktreePath: lane.worktreePath,
+        branch: lane.branch,
+        taskId: result.taskId,
+        pick,
+      });
+    } catch (err) {
+      failures.push(`mergeLane failed: ${String(err)}`);
+    }
+    const subjects = await headSubjects(workDir);
+    if (!subjects.includes(`user pick: lane ${pick} (${result.taskId})`)) {
+      failures.push(`merge commit for ${pick} not found on the current branch`);
+    }
+  } else {
+    const subjects = await headSubjects(workDir);
+    if (subjects.some((s) => s.startsWith('user pick:'))) {
+      failures.push('single lane not mergeable but a merge commit landed on the current branch');
+    }
+  }
+
+  const stats = await collectEventStats(result.eventsFile);
+  return {
+    scenarioId: scenario.id,
+    pass: failures.length === 0,
+    failures,
+    durationMs: 0, // filled in by runScenario
+    eventsFile: result.eventsFile,
+    workDir,
+    pick,
+    resolvedMode,
+    laneOutcomes: { single: lane.outcome },
+    ...stats,
+  };
+}
+
+/**
+ * auto: the router (runRouted over the injected engines + the deterministic rules
+ * dispatcher — evals never spend a real CLI call on routing) classifies the prompt
+ * and dispatches; the resolved mode is asserted via expectMode. cascade and single
+ * resolutions get their merge gate reenacted; the thinking modes (brainstorm /
+ * roundtable) and compete get their expectations checked without a gate.
  */
 async function runAutoScenario(scenario: EvalScenario, deps: EvalDeps, failures: string[]): Promise<ScenarioResult> {
   const workDir = await mkdtemp(path.join(os.tmpdir(), `modes-eval-${scenario.id}-`));
@@ -452,11 +520,47 @@ async function runAutoScenario(scenario: EvalScenario, deps: EvalDeps, failures:
 
   const { classification, result } = await runRouted(
     { prompt: scenario.prompt, repoPath: workDir },
-    { runTask: deps.runTask, runBrainstorm: deps.runBrainstorm, runCascade: deps.runCascade }
+    {
+      runTask: deps.runTask,
+      runBrainstorm: deps.runBrainstorm,
+      runCascade: deps.runCascade,
+      runSingle: deps.runSingle,
+      runRoundtable: deps.runRoundtable,
+    },
+    rulesDispatcher
   );
 
   if (classification.mode === 'cascade') {
     return finalizeCascadeScenario(scenario, result as CascadeResult, workDir, deps, failures, classification.mode);
+  }
+
+  if (classification.mode === 'single') {
+    return finalizeSingleScenario(scenario, result as SingleResult, workDir, deps, failures, classification.mode);
+  }
+
+  if (classification.mode === 'roundtable') {
+    const rt = result as RoundtableResult;
+    failures.push(
+      ...checkExpectations(scenario, {
+        laneSuccesses: rt.rounds[0]?.lanes.filter((l) => l.outcome === 'success').length ?? 0,
+        hasReview: false,
+        hasSynthesis: rt.synthesis !== null,
+        roundCount: rt.rounds.length,
+        resolvedMode: classification.mode,
+      })
+    );
+    const stats = await collectEventStats(rt.eventsFile);
+    return {
+      scenarioId: scenario.id,
+      pass: failures.length === 0,
+      failures,
+      durationMs: 0, // filled in by runScenario
+      eventsFile: rt.eventsFile,
+      workDir,
+      resolvedMode: classification.mode,
+      laneOutcomes: Object.fromEntries(rt.rounds.flatMap((r) => r.lanes.map((l) => [`r${r.round}:${l.cli}`, l.outcome]))),
+      ...stats,
+    };
   }
 
   const lanes = (result as RunTaskResult | BrainstormResult).lanes;

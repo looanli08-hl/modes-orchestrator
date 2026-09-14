@@ -14,6 +14,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { classifyTask } from '../src/router/classifyTask';
 import {
   createConsoleServer,
   type BrainstormEngineResult,
@@ -21,6 +22,7 @@ import {
   type CompeteEngineResult,
   type ConsoleDeps,
   type RoundtableEngineResult,
+  type SingleEngineResult,
 } from '../src/server/consoleServer';
 
 interface Deferred<T> {
@@ -121,16 +123,37 @@ function makeRoundtableResult(overrides: Partial<RoundtableEngineResult> = {}): 
   };
 }
 
+function makeSingleResult(overrides: Partial<SingleEngineResult['lane']> = {}): SingleEngineResult {
+  return {
+    taskId: 'task-eng-5',
+    lane: {
+      cli: 'kimi',
+      outcome: 'success',
+      latency: 900,
+      summary: 'single did it',
+      diff: 'diff --git a/x b/x',
+      worktreePath: '/wt/single',
+      branch: 'modes/t-single',
+      ...overrides,
+    },
+    eventsFile: '/tmp/events.jsonl',
+  };
+}
+
 function makeFakeDeps() {
   const compete = deferred<CompeteEngineResult>();
   const brainstorm = deferred<BrainstormEngineResult>();
   const cascade = deferred<CascadeEngineResult>();
   const roundtable = deferred<RoundtableEngineResult>();
+  const single = deferred<SingleEngineResult>();
   const deps: ConsoleDeps = {
     runCompete: vi.fn(() => compete.promise),
     runBrainstormTask: vi.fn(() => brainstorm.promise),
     runCascadeTask: vi.fn(() => cascade.promise),
     runRoundtableTask: vi.fn(() => roundtable.promise),
+    runSingleTask: vi.fn(() => single.promise),
+    // deterministic AI-dispatch stand-in: the rule router's verdict, stamped as 'ai'
+    dispatch: vi.fn(async (prompt: string) => ({ ...classifyTask(prompt), dispatchSource: 'ai' as const })),
     detectClis: vi.fn(async () => [
       { name: 'kimi', available: true },
       { name: 'qwen', available: true },
@@ -139,7 +162,7 @@ function makeFakeDeps() {
     recordPick: vi.fn(async () => {}),
     mergeLane: vi.fn(async () => {}),
   };
-  return { deps, compete, brainstorm, cascade, roundtable };
+  return { deps, compete, brainstorm, cascade, roundtable, single };
 }
 
 const servers: Server[] = [];
@@ -810,6 +833,8 @@ describe('clis mapping onto other modes', () => {
     const { deps, brainstorm } = makeFakeDeps();
     const baseUrl = await startServer(deps);
     await postJson(baseUrl, '/api/tasks', { mode: 'auto', prompt: '你怎么看这个方案', clis: ['iflow', 'kimi'] });
+    // the dispatch is async — the engine call lands once it resolves
+    await vi.waitFor(() => expect(deps.runBrainstormTask).toHaveBeenCalled(), { timeout: 2000, interval: 20 });
     expect(deps.runBrainstormTask).toHaveBeenCalledWith({
       workDir: process.cwd(),
       prompt: '你怎么看这个方案',
@@ -868,8 +893,11 @@ describe('GET /api/clis', () => {
 });
 
 describe('auto mode routing', () => {
-  it('resolves an executional prompt to cascade at request time and stores the classification', async () => {
+  it('dispatches asynchronously: the task is created under provisional mode auto, then resolved + run', async () => {
     const { deps, cascade } = makeFakeDeps();
+    // a gated dispatch: the provisional state is observable only while it pends
+    const dispatched = deferred<ReturnType<typeof classifyTask>>();
+    vi.mocked(deps.dispatch!).mockImplementationOnce(() => dispatched.promise);
     const baseUrl = await startServer(deps);
 
     const res = await postJson(baseUrl, '/api/tasks', {
@@ -880,8 +908,17 @@ describe('auto mode routing', () => {
     expect(res.status).toBe(201);
     const { id } = (await res.json()) as { id: string };
 
-    // classification is synchronous (a pure function): the resolved engine is
-    // already running with the default chain by the time POST returns
+    // POST returns before the (AI) dispatch resolves: the task is running under
+    // the provisional mode 'auto' with no classification yet, and no engine started
+    const pending = await getTask(baseUrl, id);
+    expect(pending.mode).toBe('auto');
+    expect(pending.status).toBe('running');
+    expect(pending.classification).toBeNull();
+    expect(deps.runCascadeTask).not.toHaveBeenCalled();
+
+    // once the dispatch lands, the resolved engine starts with the default chain
+    dispatched.resolve({ ...classifyTask('Create a file util.js with a clamp function'), dispatchSource: 'ai' });
+    await vi.waitFor(() => expect(deps.runCascadeTask).toHaveBeenCalled(), { timeout: 2000, interval: 20 });
     expect(deps.runCascadeTask).toHaveBeenCalledWith({
       repoPath: '/repo',
       prompt: 'Create a file util.js with a clamp function',
@@ -895,7 +932,7 @@ describe('auto mode routing', () => {
 
     const task = await getTask(baseUrl, id);
     expect(task.mode).toBe('cascade');
-    expect(task.classification).toMatchObject({ mode: 'cascade', confidence: 'high' });
+    expect(task.classification).toMatchObject({ mode: 'cascade', confidence: 'high', dispatchSource: 'ai' });
     expect((task.classification as { reason: string }).reason.length).toBeGreaterThan(0);
 
     // the list summary carries the classification too (the panel badges auto tasks)
@@ -910,6 +947,7 @@ describe('auto mode routing', () => {
     const res = await postJson(baseUrl, '/api/tasks', { mode: 'auto', prompt: '你怎么看这个方案', repoPath: '/repo' });
     expect(res.status).toBe(201);
     const { id } = (await res.json()) as { id: string };
+    await vi.waitFor(() => expect(deps.runBrainstormTask).toHaveBeenCalled(), { timeout: 2000, interval: 20 });
     expect(deps.runBrainstormTask).toHaveBeenCalledWith({ workDir: '/repo', prompt: '你怎么看这个方案' });
 
     brainstorm.resolve(makeBrainstormResult());
@@ -927,6 +965,7 @@ describe('auto mode routing', () => {
     const res = await postJson(baseUrl, '/api/tasks', { mode: 'auto', prompt: '给我两个方案实现防抖', repoPath: '/repo' });
     expect(res.status).toBe(201);
     const { id } = (await res.json()) as { id: string };
+    await vi.waitFor(() => expect(deps.runCompete).toHaveBeenCalled(), { timeout: 2000, interval: 20 });
     expect(deps.runCompete).toHaveBeenCalledWith({ repoPath: '/repo', prompt: '给我两个方案实现防抖' });
 
     compete.resolve(makeCompeteResult());
@@ -937,6 +976,25 @@ describe('auto mode routing', () => {
     expect(task.classification).toMatchObject({ mode: 'compete' });
   });
 
+  it('the dispatcher receives the prompt and resolved repoPath', async () => {
+    const { deps, brainstorm } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    await postJson(baseUrl, '/api/tasks', { mode: 'auto', prompt: '你怎么看这个方案' });
+    await vi.waitFor(() => expect(deps.dispatch).toHaveBeenCalled(), { timeout: 2000, interval: 20 });
+    expect(deps.dispatch).toHaveBeenCalledWith('你怎么看这个方案', process.cwd());
+    brainstorm.resolve(makeBrainstormResult());
+  });
+
+  it('a throwing dispatcher lands the task in failed (the real one falls back internally, an injected one may not)', async () => {
+    const { deps } = makeFakeDeps();
+    vi.mocked(deps.dispatch!).mockRejectedValueOnce(new Error('dispatch blew up'));
+    const baseUrl = await startServer(deps);
+    const res = await postJson(baseUrl, '/api/tasks', { mode: 'auto', prompt: 'anything' });
+    const { id } = (await res.json()) as { id: string };
+    await waitForStatus(baseUrl, id, 'failed');
+    expect((await getTask(baseUrl, id)).error).toBe('dispatch blew up');
+  });
+
   it('explicit-mode tasks carry classification null', async () => {
     const { deps, compete } = makeFakeDeps();
     const baseUrl = await startServer(deps);
@@ -944,6 +1002,121 @@ describe('auto mode routing', () => {
     compete.resolve(makeCompeteResult());
     await waitForStatus(baseUrl, id, 'awaiting_pick');
     expect((await getTask(baseUrl, id)).classification).toBeNull();
+  });
+});
+
+describe('single flow', () => {
+  async function createSingleTask(baseUrl: string, body: Record<string, unknown> = {}): Promise<string> {
+    const res = await postJson(baseUrl, '/api/tasks', { mode: 'single', prompt: 'one shot', repoPath: '/repo', ...body });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  it('runs the first lit chip, defaulting to kimi; success with a diff awaits the pick', async () => {
+    const { deps, single } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+
+    const id = await createSingleTask(baseUrl);
+    expect(deps.runSingleTask).toHaveBeenCalledWith({ repoPath: '/repo', prompt: 'one shot', cli: 'kimi' });
+
+    single.resolve(makeSingleResult());
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+
+    const task = await getTask(baseUrl, id);
+    expect(task.mode).toBe('single');
+    expect(task.engineTaskId).toBe('task-eng-5');
+    expect(task.lane).toMatchObject({ cli: 'kimi', outcome: 'success', summary: 'single did it', diff: 'diff --git a/x b/x' });
+    // pick-time pointers stay server-side
+    const lane = task.lane as Record<string, unknown>;
+    expect(lane.worktreePath).toBeUndefined();
+    expect(lane.branch).toBeUndefined();
+
+    // the first lit chip wins when the request carries clis
+    await createSingleTask(baseUrl, { clis: ['qwen', 'kimi'] });
+    expect(deps.runSingleTask).toHaveBeenLastCalledWith({ repoPath: '/repo', prompt: 'one shot', cli: 'qwen' });
+    single.resolve(makeSingleResult({ cli: 'qwen' }));
+  });
+
+  it('pick single records the gate and merges the lane worktree', async () => {
+    const { deps, single } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createSingleTask(baseUrl);
+    single.resolve(makeSingleResult());
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+
+    const res = await postJson(baseUrl, `/api/tasks/${id}/pick`, { pick: 'single' });
+    expect(res.status).toBe(200);
+    expect(deps.recordPick).toHaveBeenCalledWith('/tmp/events.jsonl', {
+      taskId: 'task-eng-5',
+      pick: 'single',
+      reviewVerdict: null,
+    });
+    expect(deps.mergeLane).toHaveBeenCalledWith({
+      repoPath: '/repo',
+      worktreePath: '/wt/single',
+      branch: 'modes/t-single',
+      taskId: 'task-eng-5',
+      pick: 'single',
+    });
+    expect((await getTask(baseUrl, id)).status).toBe('done');
+  });
+
+  it('rejects an unknown pick value with 400', async () => {
+    const { deps, single } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createSingleTask(baseUrl);
+    single.resolve(makeSingleResult());
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+
+    const res = await postJson(baseUrl, `/api/tasks/${id}/pick`, { pick: 'A' });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain('single, neither');
+  });
+
+  it('lane failure is terminal and honest: done, no pick possible', async () => {
+    const { deps, single } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createSingleTask(baseUrl);
+    single.resolve(makeSingleResult({ outcome: 'failed', summary: '', diff: '' }));
+    await waitForStatus(baseUrl, id, 'done');
+
+    const task = await getTask(baseUrl, id);
+    expect((task.lane as Record<string, unknown>).outcome).toBe('failed');
+
+    const res = await postJson(baseUrl, `/api/tasks/${id}/pick`, { pick: 'single' });
+    expect(res.status).toBe(409);
+    expect(deps.recordPick).not.toHaveBeenCalled();
+  });
+
+  it('success with an empty diff (nothing to merge) is done without a gate', async () => {
+    const { deps, single } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const id = await createSingleTask(baseUrl);
+    single.resolve(makeSingleResult({ diff: '' }));
+    await waitForStatus(baseUrl, id, 'done');
+    expect((await getTask(baseUrl, id)).lane).toMatchObject({ outcome: 'success', diff: '' });
+  });
+
+  it('auto dispatch to single runs runSingleTask and stores the ai classification', async () => {
+    const { deps, single } = makeFakeDeps();
+    vi.mocked(deps.dispatch!).mockResolvedValueOnce({
+      mode: 'single',
+      confidence: 'high',
+      reason: '原子小任务，一路就够',
+      dispatchSource: 'ai',
+    });
+    const baseUrl = await startServer(deps);
+
+    const res = await postJson(baseUrl, '/api/tasks', { mode: 'auto', prompt: 'fix the typo', repoPath: '/repo', clis: ['qwen'] });
+    const { id } = (await res.json()) as { id: string };
+    await vi.waitFor(() => expect(deps.runSingleTask).toHaveBeenCalled(), { timeout: 2000, interval: 20 });
+    expect(deps.runSingleTask).toHaveBeenCalledWith({ repoPath: '/repo', prompt: 'fix the typo', cli: 'qwen' });
+
+    single.resolve(makeSingleResult({ cli: 'qwen' }));
+    await waitForStatus(baseUrl, id, 'awaiting_pick');
+    const task = await getTask(baseUrl, id);
+    expect(task.mode).toBe('single');
+    expect(task.classification).toMatchObject({ mode: 'single', dispatchSource: 'ai', reason: '原子小任务，一路就够' });
   });
 });
 

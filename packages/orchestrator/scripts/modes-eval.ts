@@ -23,6 +23,7 @@ import { recordUserPick } from '../src/gate/recordUserPick';
 import { runBrainstorm } from '../src/patterns/brainstorm';
 import { runCascade } from '../src/patterns/cascade';
 import { runRoundtable } from '../src/patterns/roundtable';
+import { runSingle } from '../src/patterns/single';
 import { runTask } from '../src/run/runTask';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +46,7 @@ console.log(`modes-eval: ${scenarios.length} scenario(s) (${scope}), real CLIs (
 
 const results = await runEval(
   scenarios,
-  { runTask, runBrainstorm, runCascade, runRoundtable, recordPick: recordUserPick, mergeLane },
+  { runTask, runBrainstorm, runCascade, runRoundtable, runSingle, recordPick: recordUserPick, mergeLane },
   { eventsDir }
 );
 

@@ -145,6 +145,7 @@
     <form id="run-form">
       <div class="mode-toggle">
         <button type="button" id="mode-auto" class="active">auto</button>
+        <button type="button" id="mode-single">single</button>
         <button type="button" id="mode-compete">compete</button>
         <button type="button" id="mode-brainstorm">brainstorm</button>
         <button type="button" id="mode-cascade">cascade</button>
@@ -392,10 +393,16 @@ function renderDetail(task) {
   state.lastTask = task;
   const detail = $("detail");
   const classificationBanner = task.classification
-    ? `<div class="banner classification">
-        <div><span class="verdict">auto → ${esc(task.classification.mode)}</span>${task.classification.confidence ? ` · ${esc(task.classification.confidence)} confidence` : ""}</div>
-        <div class="muted">${esc(task.classification.reason)}</div>
-      </div>`
+    ? (() => {
+        // who made the call: the AI dispatcher, or the rule router as its fallback
+        const source = task.classification.dispatchSource === "ai" ? "AI dispatch"
+          : task.classification.dispatchSource === "rules-fallback" ? "rules fallback"
+          : task.classification.confidence ? `${task.classification.confidence} confidence` : "";
+        return `<div class="banner classification">
+          <div><span class="verdict">auto → ${esc(task.classification.mode)}</span>${source ? ` · ${esc(source)}` : ""}</div>
+          <div class="muted">${esc(task.classification.reason)}</div>
+        </div>`;
+      })()
     : "";
   let html = `
     <h2>${esc(task.prompt)}</h2>
@@ -411,6 +418,8 @@ function renderDetail(task) {
     html += renderCascade(task);
   } else if (task.mode === "roundtable") {
     html += renderRoundtable(task);
+  } else if (task.mode === "single") {
+    html += renderSingle(task);
   } else {
     html += renderBrainstorm(task);
   }
@@ -419,7 +428,9 @@ function renderDetail(task) {
   if (task.status === "awaiting_pick") {
     const picks = task.mode === "cascade"
       ? [`cascade-${task.winner.level}`, "neither"]
-      : [...(task.lanes || []).map((l) => l.lane), "neither"];
+      : task.mode === "single"
+        ? ["single", "neither"]
+        : [...(task.lanes || []).map((l) => l.lane), "neither"];
     for (const pick of picks) {
       $(`pick-${pick}`).addEventListener("click", () => applyPick(task.id, pick));
     }
@@ -498,6 +509,33 @@ function renderCascade(task) {
   return html;
 }
 
+// single: one shot, one lane — merge only when there is a diff to merge
+function renderSingle(task) {
+  const l = task.lane;
+  if (!l) return `<p class="muted">(no lane result)</p>`;
+  let html = `<div class="lanes single">
+    <div class="lane-card">
+      <header><h3>${esc(l.cli)}</h3>${outcomeBadge(l.outcome)}</header>
+      <div class="body">
+        <p>${esc(l.summary || "(no summary)")}</p>
+        ${l.diff ? renderDiff(l.diff, `${task.id}:single`) : `<p class="muted">(no changes)</p>`}
+      </div>
+    </div></div>`;
+  if (task.status === "awaiting_pick") {
+    html += `<div class="pick-bar">
+      <button id="pick-single">Merge</button>
+      <button id="pick-neither">Neither</button>
+      <span class="muted">merges the lane's diff into the current branch</span>
+    </div>`;
+  } else if (task.status === "done" && l.outcome === "success" && l.diff) {
+    html += `<p class="muted" style="margin-top:16px">Pick recorded — task done.</p>`;
+  } else if (task.status === "done" && l.outcome !== "success") {
+    html += `<div class="banner"><span class="verdict">lane failed — nothing to merge</span>
+      <div class="muted">single is one shot: there is no fallback level, the failure is reported as-is.</div></div>`;
+  }
+  return html;
+}
+
 function renderBrainstorm(task) {
   let html = `<div class="lanes single">` + (task.lanes || []).map((l) => `
     <div class="lane-card">
@@ -561,22 +599,18 @@ async function applyPick(id, pick) {
 
 function setMode(mode) {
   state.mode = mode;
-  $("mode-auto").classList.toggle("active", mode === "auto");
-  $("mode-compete").classList.toggle("active", mode === "compete");
-  $("mode-brainstorm").classList.toggle("active", mode === "brainstorm");
-  $("mode-cascade").classList.toggle("active", mode === "cascade");
-  $("mode-roundtable").classList.toggle("active", mode === "roundtable");
-  // brainstorm and roundtable need no git repo (thinking, not commits); compete
-  // and cascade run in worktrees of one; auto may route anywhere, so keep the
-  // field (ignored on the thinking modes)
+  for (const m of ["auto", "single", "compete", "brainstorm", "cascade", "roundtable"]) {
+    $(`mode-${m}`).classList.toggle("active", mode === m);
+  }
+  // brainstorm and roundtable need no git repo (thinking, not commits); compete,
+  // cascade and single run in worktrees of one; auto may route anywhere, so keep
+  // the field (ignored on the thinking modes)
   $("repo-path").style.display = mode === "brainstorm" || mode === "roundtable" ? "none" : "";
 }
 
-$("mode-auto").addEventListener("click", () => setMode("auto"));
-$("mode-compete").addEventListener("click", () => setMode("compete"));
-$("mode-brainstorm").addEventListener("click", () => setMode("brainstorm"));
-$("mode-cascade").addEventListener("click", () => setMode("cascade"));
-$("mode-roundtable").addEventListener("click", () => setMode("roundtable"));
+for (const m of ["auto", "single", "compete", "brainstorm", "cascade", "roundtable"]) {
+  $(`mode-${m}`).addEventListener("click", () => setMode(m));
+}
 
 $("run-form").addEventListener("submit", async (e) => {
   e.preventDefault();

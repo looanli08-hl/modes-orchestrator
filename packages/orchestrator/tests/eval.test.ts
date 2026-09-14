@@ -174,6 +174,28 @@ function makeFakeRunRoundtable(config: {
   };
 }
 
+/** fake runSingle: records one worker event into a real JSONL log, returns a scripted lane */
+function makeFakeRunSingle(config: { outcome: 'success' | 'failed'; diff: string }): EvalDeps['runSingle'] {
+  return async (options) => {
+    const taskId = 'task-fake';
+    const eventsFile = path.join(options.repoPath, '.modes', 'events.jsonl');
+    await appendFakeEvent(eventsFile, taskId, 'single', 'worker', config.outcome);
+    return {
+      taskId,
+      lane: {
+        cli: options.cli,
+        outcome: config.outcome,
+        latency: 1,
+        summary: 'single summary',
+        diff: config.diff,
+        worktreePath: path.join(options.repoPath, '.modes-worktrees', `${taskId}-single`),
+        branch: `modes/${taskId}-single`,
+      },
+      eventsFile,
+    };
+  };
+}
+
 /** fake mergeLane: simulates the real merge by landing its exact commit subject */
 const fakeMergeLane: EvalDeps['mergeLane'] = async ({ repoPath, taskId, pick }) => {
   await execFileAsync(
@@ -189,6 +211,7 @@ function makeDeps(overrides: Partial<EvalDeps> = {}): EvalDeps {
     runBrainstorm: makeFakeRunBrainstorm({ outcomes: { A: 'success', B: 'success' }, synthesis: 'combined' }),
     runCascade: makeFakeRunCascade({ attempts: [{ cli: 'cheap', outcome: 'success' }], winnerLevel: 1 }),
     runRoundtable: makeFakeRunRoundtable({ consensus: false, synthesis: 'combined' }),
+    runSingle: makeFakeRunSingle({ outcome: 'success', diff: 'diff from single' }),
     recordPick: recordUserPick,
     mergeLane: fakeMergeLane,
     ...overrides,

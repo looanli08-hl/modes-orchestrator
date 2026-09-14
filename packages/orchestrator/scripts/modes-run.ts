@@ -1,16 +1,18 @@
 /**
  * modes-run — the MVP as one interactive command (spec-mvp §1 + §2.5).
  *
- * Usage:  bun packages/orchestrator/scripts/modes-run.ts [--mode compete|brainstorm|cascade|roundtable|auto] "<prompt>" [repoPath]
+ * Usage:  bun packages/orchestrator/scripts/modes-run.ts [--mode single|compete|brainstorm|cascade|roundtable|auto] "<prompt>" [repoPath]
  *         echo A | bun ...modes-run.ts ...   (piped pick, for testing)
  * compete (default): fan-out → cross-review → show both diffs → you pick → merge.
  *   repoPath defaults to the current directory (must be a git repo).
+ * single: one CLI (kimi) answers directly, one shot — merge its diff or don't.
  * brainstorm: N lanes answer in parallel → synthesis of the diversity. No pick, no merge.
  * roundtable: N CLIs answer, a reviewer judges consensus, non-consensus → a revision
  *   round where lanes see each other's answers, then synthesis. No pick, no merge.
  * cascade: cheap CLI first, escalate on failure or empty diff → winner diff → merge or not.
- * auto: the router classifies the prompt (classification printed first), then the
- *   resolved mode runs with its usual lanes/chain and the exact same display + gate.
+ * auto: the AI dispatcher (kimi, rule fallback) picks the mode — the decision and its
+ *   reason are printed first, then the resolved mode runs with its usual lanes/chain
+ *   and the exact same display + gate.
  */
 
 import path from 'node:path';
@@ -22,7 +24,7 @@ import type { UserPick } from '../src/gate/userGate';
 import { runBrainstorm, type BrainstormResult } from '../src/patterns/brainstorm';
 import { runCascade, type CascadeResult } from '../src/patterns/cascade';
 import { runRoundtable, type RoundtableResult } from '../src/patterns/roundtable';
-import { classifyTask } from '../src/router/classifyTask';
+import { runSingle, type SingleResult } from '../src/patterns/single';
 import { runRouted } from '../src/router/runRouted';
 import { runTask, type RunTaskResult } from '../src/run/runTask';
 
@@ -138,34 +140,79 @@ async function presentCompeteResult(repoPath: string, result: RunTaskResult): Pr
   }
 }
 
+async function presentSingleResult(repoPath: string, result: SingleResult): Promise<void> {
+  const lane = result.lane;
+  console.log(`task: ${result.taskId}`);
+  console.log(`\n──── SINGLE (${lane.cli}, ${lane.outcome}) ────`);
+  console.log(lane.summary.slice(0, 1500));
+  console.log(lane.diff ? lane.diff.slice(0, 2000) : '(no changes)');
+
+  // The gate: merge the lane's diff or don't — but only when there is one.
+  const mergeable = lane.outcome === 'success' && lane.diff.trim() !== '';
+  let merge = false;
+  if (mergeable) {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise<string>((resolve) => rl.question('\nMerge? [y/N] ', resolve));
+    rl.close();
+    merge = answer.trim().toLowerCase() === 'y';
+  }
+
+  const pick: UserPick = merge ? 'single' : 'neither';
+  await recordUserPick(result.eventsFile, { taskId: result.taskId, pick, reviewVerdict: null });
+
+  if (pick === 'neither') {
+    console.log(`\nRecorded: neither. Worktrees kept at ${repoPath}/.modes-worktrees/ for inspection.`);
+  } else {
+    await mergeLane({ repoPath, worktreePath: lane.worktreePath, branch: lane.branch, taskId: result.taskId, pick });
+    console.log(`\nMerged single (${lane.cli}) into the current branch. Gate recorded (verifier human:${pick}).`);
+  }
+}
+
 const args = process.argv.slice(2);
 const modeFlagIndex = args.indexOf('--mode');
 const mode = modeFlagIndex >= 0 ? args[modeFlagIndex + 1] : 'compete';
 if (modeFlagIndex >= 0) args.splice(modeFlagIndex, 2);
 
 const prompt = args[0];
-if (!prompt || (mode !== 'compete' && mode !== 'brainstorm' && mode !== 'cascade' && mode !== 'auto' && mode !== 'roundtable')) {
-  console.error('usage: bun modes-run.ts [--mode compete|brainstorm|cascade|roundtable|auto] "<prompt>" [repoPath]');
+if (
+  !prompt ||
+  (mode !== 'single' && mode !== 'compete' && mode !== 'brainstorm' && mode !== 'cascade' && mode !== 'auto' && mode !== 'roundtable')
+) {
+  console.error('usage: bun modes-run.ts [--mode single|compete|brainstorm|cascade|roundtable|auto] "<prompt>" [repoPath]');
   process.exit(2);
 }
 const repoPath = path.resolve(args[1] ?? process.cwd());
 
 if (mode === 'auto') {
-  // classify + print first (pure function, instant) so the routing decision is
-  // visible before the lanes start spending quota; runRouted re-derives it.
-  const classification = classifyTask(prompt);
+  // the AI dispatcher (a kimi call, rule fallback built in) decides; the decision
+  // and its reason print before the resolved mode starts spending quota.
+  const { classification, result } = await runRouted({ prompt, repoPath });
+  const source = classification.dispatchSource === 'ai' ? 'AI dispatch' : 'rules fallback';
   console.log(`repo: ${repoPath}`);
   console.log(`prompt: ${prompt}`);
-  console.log(`auto → ${classification.mode} (${classification.confidence}): ${classification.reason}\n`);
+  console.log(`auto → ${classification.mode} (${source}): ${classification.reason}\n`);
 
-  const { result } = await runRouted({ prompt, repoPath });
-  if (classification.mode === 'brainstorm') {
+  if (classification.mode === 'single') {
+    await presentSingleResult(repoPath, result as SingleResult);
+  } else if (classification.mode === 'brainstorm') {
     presentBrainstormResult(result as BrainstormResult);
+  } else if (classification.mode === 'roundtable') {
+    presentRoundtableResult(result as RoundtableResult);
   } else if (classification.mode === 'cascade') {
     await presentCascadeResult(repoPath, result as CascadeResult);
   } else {
     await presentCompeteResult(repoPath, result as RunTaskResult);
   }
+  process.exit(0);
+}
+
+if (mode === 'single') {
+  console.log(`repo: ${repoPath}`);
+  console.log(`prompt: ${prompt}`);
+  console.log('single shot with kimi (no fallback — one shot, honest result) …\n');
+
+  const result = await runSingle({ repoPath, prompt, cli: 'kimi' });
+  await presentSingleResult(repoPath, result);
   process.exit(0);
 }
 

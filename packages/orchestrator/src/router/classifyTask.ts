@@ -15,14 +15,25 @@
  * (pattern → mode + user-facing reason) so tuning the router is a table edit.
  */
 
-export type RoutedMode = 'compete' | 'brainstorm' | 'cascade';
+/**
+ * Every mode the auto dispatcher can resolve to. classifyTask itself only ever
+ * returns compete/brainstorm/cascade; single and roundtable enter through the
+ * AI dispatcher (dispatchTask.ts).
+ */
+export type RoutedMode = 'single' | 'compete' | 'brainstorm' | 'cascade' | 'roundtable';
 
 export interface TaskClassification {
   mode: RoutedMode;
   /** high = an explicit rule fired; low = pure fallback */
   confidence: 'high' | 'low';
-  /** short human-facing note: which rule fired, shown in the CLI/console */
+  /** short human-facing note: which rule fired / why the dispatcher picked this mode */
   reason: string;
+  /**
+   * Who made the call: 'ai' = the AI dispatcher's ROUTE marker parsed cleanly;
+   * 'rules-fallback' = the AI dispatcher failed or answered malformed and
+   * classifyTask took over. Undefined for a direct classifyTask call.
+   */
+  dispatchSource?: 'ai' | 'rules-fallback';
 }
 
 interface RouteRule {

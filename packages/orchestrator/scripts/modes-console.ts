@@ -24,6 +24,7 @@ import { recordUserPick } from '../src/gate/recordUserPick';
 import { runBrainstorm } from '../src/patterns/brainstorm';
 import { runCascade } from '../src/patterns/cascade';
 import { runRoundtable } from '../src/patterns/roundtable';
+import { runSingle } from '../src/patterns/single';
 import { runTask } from '../src/run/runTask';
 
 const port = Number(process.env.PORT ?? 4177);
@@ -46,6 +47,9 @@ const server = createConsoleServer({
   // the server applies the default chain (qwen → kimi) when the request omits one
   runCascadeTask: ({ repoPath, prompt, chain }) => runCascade({ repoPath, prompt, chain }),
   runRoundtableTask: ({ workDir, prompt, clis }) => runRoundtable({ prompt, clis, workDir }),
+  // the server picks the first lit chip, defaulting to kimi
+  runSingleTask: ({ repoPath, prompt, cli }) => runSingle({ repoPath, prompt, cli }),
+  // auto uses the server's default: the AI dispatcher (kimi call + rule fallback)
   recordPick: (eventsFile, opts) => recordUserPick(eventsFile, opts),
   mergeLane: (opts) => mergeLane(opts),
 }, { registry });
