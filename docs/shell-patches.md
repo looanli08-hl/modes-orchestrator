@@ -6,4 +6,4 @@
 
 | # | 日期 | 文件 | 改动 | 理由 | 上游同步注意点 |
 |---|------|------|------|------|----------------|
-| 1 | 2026-09-14 | `packages/desktop/src/renderer/`（侧边栏组件，具体文件见 commit） | 主侧边栏新增 "modes" 入口，导航到 `/settings/ext/ext-modes-console-modes-console`（modes console 扩展页） | 编排面板需要一等入口，不能永远藏在设置页（扩展机制 v2.2.2 只允许 settings tab 着陆） | 纯新增一个导航项；若上游改了侧边栏结构，把入口项平移到新结构即可，无逻辑耦合 |
+| 1 | 2026-09-14 | `packages/desktop/src/renderer/components/layout/Sider/index.tsx`、`.../Sider/SiderNav/SiderModesEntry.tsx`（新增）、`.../Sider/SiderNav/index.ts`、`packages/desktop/src/renderer/services/i18n/locales/*/common.json`（13 个 locale，各加 `"modes"` 一行） | 主侧边栏新增 "modes" 入口（Layers 图标，位于"定时任务"项下方），导航到 `/settings/ext/ext-modes-console-modes-console`（modes console 扩展页） | 编排面板需要一等入口，不能永远藏在设置页（扩展机制 v2.2.2 只允许 settings tab 着陆） | 纯新增一个导航项；若上游改了侧边栏结构，把入口项平移到新结构即可，无逻辑耦合 |
