@@ -205,3 +205,10 @@ bun run dev
 - [x] 面板二次重写（947 → 1143 行）：GitHub dark 冷调双主题、左栏按 In progress/Needs review/Done 分组带计数、任务视图 sticky 细 bar、lane 全部改终端面板语汇、diff 升级 GitHub 风（多文件分组头 + +/- 计数徽章 + 双行号列 + 暗色半透明红绿行）
 - [x] Playwright 截图实测 light/dark 双主题空状态 + 任务视图（/tmp/modes-panel-*.png）；352 测试全绿零改动
 - 已知缺口（backlog）：面板主题跟随 OS prefers-color-scheme，与壳的主题开关联动未接；App 内 /modes 页加载的是 activate.js 生成的扩展资产副本，dev app 需重激活才拿到新面板
+
+## Day 3 — 空状态改 AionUi 风消费者入口（产品方向定盘：Orca 的功能完整度 + AionUi 的上手感）
+
+- [x] **方向确认**（用户）：功能像 Orca 一样完整，界面像 AionUi 一样容易上手——复杂度只在需要的那层出现
+- [x] 空状态重做：居中问候"今天让团队做点什么？"、团队 pills（默认全不选=统筹自动搭配，原预点亮逻辑删除）、模式降级为小字文字链（统筹(自动)/单人/竞赛/脑暴/接力/圆桌）、16px 圆角输入卡 + 圆形发送钮、"在项目中工作"chip 收起 repo path、三条中文建议指令
+- [x] 任务视图维持 Orca 密度不动；空状态全中文，任务视图维持英文（改动面克制）
+- Playwright 双主题截图自查通过；352 测试全绿
