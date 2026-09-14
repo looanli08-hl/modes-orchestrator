@@ -113,21 +113,22 @@ describe('Layout sider brand Home button', () => {
     expect(navigate).toHaveBeenCalledWith('/conversation/abc');
   });
 
-  it('falls back to /guid in a settings route when no path is recorded', () => {
+  it('falls back to /modes in a settings route when no path is recorded', () => {
     currentPathname = '/settings/system';
     renderLayout();
 
     fireEvent.click(screen.getByLabelText(BACK_KEY));
-    expect(navigate).toHaveBeenCalledWith('/guid');
+    // Shell patch #3: brand home falls back to /modes.
+    expect(navigate).toHaveBeenCalledWith('/modes');
   });
 
-  it('falls back to /guid when the recorded path is itself a settings path', () => {
+  it('falls back to /modes when the recorded path is itself a settings path', () => {
     currentPathname = '/settings/about';
     sessionStorage.setItem('aion:last-non-settings-path', '/settings/system');
     renderLayout();
 
     fireEvent.click(screen.getByLabelText(BACK_KEY));
-    expect(navigate).toHaveBeenCalledWith('/guid');
+    expect(navigate).toHaveBeenCalledWith('/modes');
   });
 
   it('activates via keyboard (Enter and Space) in a settings route', () => {
@@ -159,7 +160,7 @@ describe('Layout sider brand Home button', () => {
 
     // No actionable role/label in chat routes.
     expect(screen.queryByLabelText(BACK_KEY)).toBeNull();
-    const wordmark = screen.getByText('AionUi');
+    const wordmark = screen.getByText('modes');
     fireEvent.click(wordmark);
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -168,7 +169,7 @@ describe('Layout sider brand Home button', () => {
     currentPathname = '/conversation/xyz';
     renderLayout();
 
-    fireEvent.click(screen.getByText('AionUi'));
+    fireEvent.click(screen.getByText('modes'));
     expect(navigate).not.toHaveBeenCalled();
   });
 

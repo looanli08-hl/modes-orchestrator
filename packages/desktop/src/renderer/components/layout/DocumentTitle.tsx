@@ -18,7 +18,8 @@ import { useTranslation } from 'react-i18next';
  * navigation and language switches.
  */
 export function titleForPath(pathname: string, t: (key: string) => string): string {
-  return pathname.startsWith('/login') ? t('login.pageTitle') : 'AionUi';
+  // Shell patch #3: the product brand is "modes"; the window title says so.
+  return pathname.startsWith('/login') ? t('login.pageTitle') : 'modes';
 }
 
 const DocumentTitle: React.FC = () => {

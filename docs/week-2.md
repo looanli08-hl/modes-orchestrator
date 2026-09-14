@@ -182,3 +182,11 @@ bun run dev
 - [x] console/panel 接入：CLI 多选 chips（/api/clis PATH 探测 + 缓存），clis→各模式 lanes/chain 映射在 server 端；roundtable 轮次分组视图 + 共识横幅
 - [x] 真实验证两条诚实路径都见过：eval 里非共识两轮辩论完整链（6 事件）；面板冒烟里第 1 轮达成共识早停
 - 测试 303 全绿。设计注记：attempt_seq 未进 JSONL schema（轮次编码在 attempt_id），提为一等字段需 spec §5 变更，留 backlog；roundtable 未进 auto 路由（显式选择），留 backlog
+
+## Day 2 续 5 — 壳补丁 #3：modes 成为产品主界面（"借壳 → 换心"第一步）
+
+- [x] **战略确认**（用户）：modes 不是 AionUi 的功能增强，是要取代它——验收标准 = 用户打开 App 第一眼看到的是 modes
+- [x] 默认路由/登录后/404 兜底三处重定向 `/guid` → `/modes`；侧边栏 modes 入口提至固定导航首位；品牌字标 + 窗口标题 + index.html meta 全部 `AionUi` → `modes`；Layout brand-home 兜底 → `/modes`
+- [x] 功能性 `/guid` 跳转（新建对话/助手选择/托盘）故意保留——语义是"去聊天"不是"回家"
+- [x] 两处上游测试断言随补丁更新（documentTitle、LayoutSiderBrandHome），已入册
+- 验证：layout+feedback 199 测试过、orchestrator 303 全绿、electron-vite build ✓、lint 仅上游存量警告。`package.json` productName 未动（打包产物名，留待正式换壳）

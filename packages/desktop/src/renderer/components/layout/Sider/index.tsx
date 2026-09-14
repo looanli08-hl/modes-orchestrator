@@ -32,7 +32,7 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
   const { theme, setTheme } = useThemeContext();
   const [isBatchMode, setIsBatchMode] = useState(false);
   const isSettings = pathname.startsWith('/settings');
-  const lastNonSettingsPathRef = useRef('/guid');
+  const lastNonSettingsPathRef = useRef('/modes');
   const showLogout =
     typeof window !== 'undefined' && !(window as { electronAPI?: unknown }).electronAPI && status === 'authenticated';
 
@@ -59,7 +59,7 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
     cleanupSiderTooltips();
     blurActiveElement();
     if (isSettings) {
-      const target = lastNonSettingsPathRef.current || '/guid';
+      const target = lastNonSettingsPathRef.current || '/modes';
       Promise.resolve(navigate(target)).catch((error) => {
         console.error('Navigation failed:', error);
       });
@@ -213,6 +213,14 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
                 onSessionClick={onSessionClick}
               />
             )}
+            {/* modes console nav entry - first fixed entry (shell patch #3: modes is the home surface) */}
+            <SiderModesEntry
+              isMobile={isMobile}
+              isActive={pathname === '/modes'}
+              collapsed={collapsed}
+              siderTooltipProps={siderTooltipProps}
+              onClick={handleModesClick}
+            />
             {/* Assistant nav entry - fixed above Scheduled */}
             <SiderAssistantEntry
               isMobile={isMobile}
@@ -228,14 +236,6 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
               collapsed={collapsed}
               siderTooltipProps={siderTooltipProps}
               onClick={handleScheduledClick}
-            />
-            {/* modes console nav entry - fixed above scroll */}
-            <SiderModesEntry
-              isMobile={isMobile}
-              isActive={pathname === '/modes'}
-              collapsed={collapsed}
-              siderTooltipProps={siderTooltipProps}
-              onClick={handleModesClick}
             />
             {/* Divider between fixed top nav and scrollable content area */}
             <div

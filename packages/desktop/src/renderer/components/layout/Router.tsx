@@ -71,10 +71,11 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
       <Routes>
         <Route
           path='/login'
-          element={status === 'authenticated' ? <Navigate to='/guid' replace /> : withRouteFallback(LoginPage)}
+          element={status === 'authenticated' ? <Navigate to='/modes' replace /> : withRouteFallback(LoginPage)}
         />
         <Route element={<ProtectedLayout layout={layout} />}>
-          <Route index element={<Navigate to='/guid' replace />} />
+          {/* Shell patch #3 (docs/shell-patches.md): modes is the home page; /guid stays reachable but is no longer the default. */}
+          <Route index element={<Navigate to='/modes' replace />} />
           <Route path='/guid' element={withRouteFallback(Guid)} />
           <Route path='/conversation/:id' element={withRouteFallback(Conversation)} />
           <Route
@@ -115,7 +116,7 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
           <Route path='/scheduled' element={withRouteFallback(ScheduledTasksPage)} />
           <Route path='/scheduled/:job_id' element={withRouteFallback(TaskDetailPage)} />
         </Route>
-        <Route path='*' element={<Navigate to={status === 'authenticated' ? '/guid' : '/login'} replace />} />
+        <Route path='*' element={<Navigate to={status === 'authenticated' ? '/modes' : '/login'} replace />} />
       </Routes>
     </HashRouter>
   );
