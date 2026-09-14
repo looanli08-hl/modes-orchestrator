@@ -41,7 +41,7 @@ modes 智能编排器：fork 自 AionUi v2.2.2（Apache-2.0），在其产品壳
 
 ## 铁律（详见 `docs/constitution.md`，这三条先记住）
 
-1. **不动 AionUi 核心目录**——编排代码只进 `packages/orchestrator/`，经适配层交互（宪法第 3 条）。
+1. **不动 AionUi 核心目录**——编排代码只进 `packages/orchestrator/`，经适配层交互（宪法第 3 条）。唯一例外是登记在 `docs/shell-patches.md` 的受控壳补丁（宪法第 3 条例外条款，2026-09-14 起）。
 2. **新代码必须带测试**——无测试不合并；移植协议时先移契约测试再写实现（宪法第 1、2 条）。
 3. **先读 docs 再动手**——`docs/vision.md`（做什么不做什么）→ `docs/constitution.md`（怎么做事）→ `docs/spec-mvp.md`（当前唯一任务）。聊天记录、临时想法不进入开发流程。
 
