@@ -198,3 +198,10 @@ bun run dev
 - [x] console 全链接入：single 进选择器（映射 clis[0]）、auto  provisional 落库后台 dispatch、横幅展示决定+理由；eval 注入 rulesDispatcher 保持确定性
 - [x] 真实冒烟两端判断全对：微小修改 → single（"原子操作，成本最低"，diff 真产出）；明说"有争议"的决策题 → roundtable（"正是 roundtable 最匹配的场景"）
 - 测试 326 → 352 全绿。观察：圆桌 scratch 目录无 repo 上下文，qwen 一度困惑"目录是空的"——lane prompt 是否该带上下文，留 backlog
+
+## Day 2 续 7 — 界面大改：对标 Orca 重排面板（用户拍板"先照抄 Orca 再解决问题"）
+
+- [x] **Orca 调研补全**（stablyai/orca README + 官方截图）：核心界面 = 左栏 workspaces 按状态分组 + 主区 agent 活动流/终端时间线 + GitHub 风 diff 评审（行号/文件头/红绿行）；其软肋 = 对比评审纯人工、配额只监控不调度、国产生态荒地、agent 间不协作
+- [x] 面板二次重写（947 → 1143 行）：GitHub dark 冷调双主题、左栏按 In progress/Needs review/Done 分组带计数、任务视图 sticky 细 bar、lane 全部改终端面板语汇、diff 升级 GitHub 风（多文件分组头 + +/- 计数徽章 + 双行号列 + 暗色半透明红绿行）
+- [x] Playwright 截图实测 light/dark 双主题空状态 + 任务视图（/tmp/modes-panel-*.png）；352 测试全绿零改动
+- 已知缺口（backlog）：面板主题跟随 OS prefers-color-scheme，与壳的主题开关联动未接；App 内 /modes 页加载的是 activate.js 生成的扩展资产副本，dev app 需重激活才拿到新面板
