@@ -190,3 +190,11 @@ bun run dev
 - [x] 功能性 `/guid` 跳转（新建对话/助手选择/托盘）故意保留——语义是"去聊天"不是"回家"
 - [x] 两处上游测试断言随补丁更新（documentTitle、LayoutSiderBrandHome），已入册
 - 验证：layout+feedback 199 测试过、orchestrator 303 全绿、electron-vite build ✓、lint 仅上游存量警告。`package.json` productName 未动（打包产物名，留待正式换壳）
+
+## Day 2 续 6 — AI 统筹调度器（auto 从规则升级为 AI 分派）+ single 模式
+
+- [x] **定位确认**（用户）：不是永远多模型，而是统筹 AI 看指令分配——该单人就单人，用户可手动覆盖
+- [x] `patterns/single.ts`：一枪模式（隔离 worktree，产出=diff，失败诚实上报无重试）；`router/dispatchTask.ts`：kimi 做分派（五模式一句话说明 + 成本纪律 prompt），`ROUTE` 标记解析取最后一个合法值，缺失/畸形/spawn 失败 → classifyTask 规则兜底，dispatchSource 标注 ai/rules-fallback
+- [x] console 全链接入：single 进选择器（映射 clis[0]）、auto  provisional 落库后台 dispatch、横幅展示决定+理由；eval 注入 rulesDispatcher 保持确定性
+- [x] 真实冒烟两端判断全对：微小修改 → single（"原子操作，成本最低"，diff 真产出）；明说"有争议"的决策题 → roundtable（"正是 roundtable 最匹配的场景"）
+- 测试 326 → 352 全绿。观察：圆桌 scratch 目录无 repo 上下文，qwen 一度困惑"目录是空的"——lane prompt 是否该带上下文，留 backlog
