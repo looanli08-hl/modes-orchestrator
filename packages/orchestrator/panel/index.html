@@ -7,42 +7,44 @@
 <style>
   :root {
     color-scheme: light dark;
-    --bg: #f7f3ec;
-    --surface: #fffdf9;
-    --border: #e3dccf;
-    --fg: #221d18;
-    --muted: #7c7466;
-    --accent: #3d7a67;
-    --accent-soft: rgba(61, 122, 103, 0.12);
-    --on-accent: #fffdf9;
-    --danger: #b04a2e;
-    --danger-soft: rgba(176, 74, 46, 0.08);
-    --success: #4a7a3f;
-    --warn: #a8702a;
-    --add-fg: #4a7a3f;
-    --add-bg: rgba(90, 140, 70, 0.1);
-    --del-fg: #b04a2e;
-    --del-bg: rgba(176, 74, 46, 0.08);
+    --bg: #ffffff;
+    --surface: #f6f8fa;
+    --term-bg: #f6f8fa;
+    --border: #d1d9e0;
+    --fg: #1f2328;
+    --muted: #59636e;
+    --accent: #0969da;
+    --accent-soft: rgba(9, 105, 218, 0.12);
+    --on-accent: #ffffff;
+    --danger: #d1242f;
+    --danger-soft: rgba(209, 36, 47, 0.08);
+    --success: #1a7f37;
+    --warn: #9a6700;
+    --add-fg: #1a7f37;
+    --add-bg: rgba(26, 127, 55, 0.12);
+    --del-fg: #d1242f;
+    --del-bg: rgba(209, 36, 47, 0.1);
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #171512;
-      --surface: #201d19;
-      --border: #2e2925;
-      --fg: #f0ebe3;
-      --muted: #a09a90;
-      --accent: #7cc1af;
-      --accent-soft: rgba(124, 193, 175, 0.14);
-      --on-accent: #14201b;
-      --danger: #e07856;
-      --danger-soft: rgba(224, 120, 86, 0.1);
-      --success: #8fb87a;
-      --warn: #d9a05b;
-      --add-fg: #8fb87a;
-      --add-bg: rgba(143, 184, 122, 0.1);
-      --del-fg: #e07856;
-      --del-bg: rgba(224, 120, 86, 0.1);
+      --bg: #0d1117;
+      --surface: #161b22;
+      --term-bg: #0d1117;
+      --border: #21262d;
+      --fg: #e6edf3;
+      --muted: #8b949e;
+      --accent: #2f81f7;
+      --accent-soft: rgba(47, 129, 247, 0.16);
+      --on-accent: #ffffff;
+      --danger: #f85149;
+      --danger-soft: rgba(248, 81, 73, 0.12);
+      --success: #3fb950;
+      --warn: #d29922;
+      --add-fg: #3fb950;
+      --add-bg: rgba(63, 185, 80, 0.15);
+      --del-fg: #f85149;
+      --del-bg: rgba(248, 81, 73, 0.15);
     }
   }
   * { box-sizing: border-box; }
@@ -59,28 +61,29 @@
   .muted { color: var(--muted); font-size: 13px; }
 
   /* --- frame: sidebar + stage ------------------------------------------- */
-  #app { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+  #app { display: grid; grid-template-columns: 272px 1fr; min-height: 100vh; }
   aside {
     border-right: 1px solid var(--border);
-    padding: 20px 12px;
+    background: var(--surface);
+    padding: 16px 10px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
     overflow-y: auto;
     max-height: 100vh;
     position: sticky;
     top: 0;
   }
   .brand { padding: 0 8px; display: flex; align-items: baseline; gap: 8px; }
-  .brand .wordmark { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
-  .brand .tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+  .brand .wordmark { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+  .brand .tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
 
   #new-task-btn {
-    margin: 0 8px;
-    padding: 7px 12px;
+    margin: 0 4px;
+    padding: 6px 12px;
     border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
+    border-radius: 6px;
+    background: var(--bg);
     color: var(--fg);
     font: inherit;
     font-size: 13px;
@@ -90,27 +93,44 @@
   }
   #new-task-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-  .section-label {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    color: var(--muted);
-    padding: 0 8px;
-  }
-
-  /* --- task history ------------------------------------------------------ */
+  /* --- task history, grouped by status ----------------------------------- */
   .task-list { display: flex; flex-direction: column; gap: 2px; }
-  .task-item {
+  .tl-group-head {
     display: flex;
-    gap: 10px;
-    padding: 8px;
-    border-radius: 8px;
+    align-items: baseline;
+    gap: 6px;
+    padding: 10px 8px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .tl-group-head .count { font-weight: 400; }
+  .tl-empty { padding: 8px; color: var(--muted); font-size: 12px; }
+  .task-item {
+    padding: 7px 8px;
+    border-radius: 6px;
     cursor: pointer;
     border: 1px solid transparent;
   }
-  .task-item:hover { background: var(--surface); }
-  .task-item.selected { background: var(--surface); border-color: var(--border); }
-  .task-item .ti-main { min-width: 0; flex: 1; }
+  .task-item:hover { background: var(--bg); }
+  .task-item.selected { background: var(--bg); border-color: var(--border); }
+  .task-item .ti-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .task-item .repo-badge {
+    flex: none;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0 5px;
+    line-height: 16px;
+    max-width: 88px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .task-item .prompt {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -120,8 +140,9 @@
   .task-item .meta { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
   .task-item .ti-mode { font-size: 11px; color: var(--muted); }
   .task-item .ti-mode .auto-mark { color: var(--accent); }
+  .task-item .ti-time { font-size: 11px; color: var(--muted); margin-left: auto; }
 
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; margin-top: 6px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
   .dot.st-running { background: var(--accent); animation: breathe 1.6s ease-in-out infinite; }
   .dot.st-done { background: var(--success); }
   .dot.st-failed { background: var(--danger); }
@@ -133,11 +154,34 @@
 
   /* --- stage ------------------------------------------------------------- */
   main { min-width: 0; }
-  section#detail { padding: 32px 40px 64px; max-width: 1080px; }
+  section#detail[hidden], #stage-empty[hidden] { display: none; }
 
-  /* empty state: the brand moment — mode picker, big ask, team roster */
+  /* task view top bar — Orca-style thin strip above the activity */
+  .task-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+  .task-bar .tb-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .task-body { padding: 24px 32px 64px; max-width: 1080px; }
+  .task-body .meta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 4px; }
+
+  /* empty state: mode picker, big ask, team roster */
   #stage-empty { display: flex; justify-content: center; padding: 10vh 32px 64px; }
-  #stage-empty[hidden], section#detail[hidden] { display: none; }
   .empty-inner { width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 28px; }
   .empty-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--muted); }
 
@@ -145,7 +189,7 @@
     display: inline-flex;
     align-self: flex-start;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 6px;
     padding: 2px;
     gap: 2px;
     background: var(--surface);
@@ -160,7 +204,7 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     padding: 5px 10px;
-    border-radius: 6px;
+    border-radius: 4px;
     cursor: pointer;
   }
   .mode-toggle button:hover { color: var(--fg); }
@@ -172,7 +216,7 @@
     min-height: 128px;
     padding: 16px 20px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--surface);
     color: var(--fg);
     font: inherit;
@@ -180,7 +224,7 @@
     line-height: 1.4;
     resize: vertical;
   }
-  textarea#prompt:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  textarea#prompt:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
   textarea#prompt::placeholder { color: var(--muted); opacity: 0.75; }
   input#repo-path {
     width: 100%;
@@ -196,14 +240,20 @@
   input#repo-path::placeholder { color: var(--muted); font-family: inherit; }
 
   .roster { display: flex; flex-direction: column; gap: 10px; }
+  .roster .section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+  }
   .cli-chips { display: flex; flex-wrap: wrap; gap: 8px; }
   .cli-chip {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    padding: 5px 12px;
+    padding: 4px 12px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--surface);
     color: var(--muted);
     font: inherit;
@@ -220,9 +270,9 @@
 
   button.primary {
     align-self: flex-start;
-    padding: 9px 24px;
+    padding: 8px 24px;
     border: 0;
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--accent);
     color: var(--on-accent);
     font: inherit;
@@ -230,14 +280,10 @@
     font-weight: 600;
     cursor: pointer;
   }
-  button.primary:hover { filter: brightness(1.06); }
+  button.primary:hover { filter: brightness(1.1); }
   button.primary:disabled { opacity: 0.5; cursor: default; }
 
-  /* --- task view ---------------------------------------------------------- */
-  .task-head { margin-bottom: 4px; }
-  .task-head h2 { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 8px; line-height: 1.35; }
-  .task-head .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-
+  /* --- badges ------------------------------------------------------------ */
   .badge {
     display: inline-block;
     padding: 1px 8px;
@@ -246,11 +292,12 @@
     border: 1px solid var(--border);
     color: var(--muted);
     background: var(--surface);
+    flex: none;
   }
-  .badge.ok { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
-  .badge.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
-  .badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-  .badge.auto { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: transparent; }
+  .badge.ok { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
+  .badge.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+  .badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+  .badge.auto { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: transparent; }
   .badge.mode { color: var(--fg); }
 
   /* the dispatcher speaks: one narrator line, its source always visible */
@@ -260,7 +307,7 @@
     border-radius: 6px;
     background: var(--surface);
     padding: 12px 16px;
-    margin: 20px 0;
+    margin: 16px 0;
   }
   .banner .banner-label {
     display: block;
@@ -283,7 +330,7 @@
   .banner.classification .verdict { color: var(--accent); }
 
   .error-box {
-    border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger) 50%, transparent);
     border-radius: 6px;
     background: var(--danger-soft);
     color: var(--danger);
@@ -292,46 +339,64 @@
     font-size: 13px;
   }
 
-  .running-note { display: flex; align-items: center; gap: 10px; margin-top: 28px; color: var(--muted); }
-  .running-note .dot { margin-top: 0; }
+  .running-note { display: flex; align-items: center; gap: 10px; margin-top: 24px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
 
-  /* lanes — compete / brainstorm / single share the card, cascade a chain */
-  .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 20px; }
+  /* --- terminal panels: lanes read as an agent activity stream ------------ */
+  .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
   .lanes.single { grid-template-columns: 1fr; }
-  .lane-card { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
-  .lane-card header {
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
+  .term { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--term-bg); }
+  .term-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 8px;
+    padding: 6px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 12px;
   }
-  .lane-card header h3 { margin: 0; font-size: 13px; font-weight: 600; }
-  .lane-card .body { padding: 14px; }
-  .lane-card .body p { margin: 0 0 12px; white-space: pre-wrap; }
-  .lane-card .body p:last-child { margin-bottom: 0; }
+  .term-head .term-name { font-weight: 600; color: var(--fg); }
+  .term-body {
+    padding: 12px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .term-body.muted-body { color: var(--muted); }
+  .term .diff { margin: 0 12px 12px; }
 
-  .chain { display: flex; align-items: stretch; overflow-x: auto; margin-top: 20px; padding-bottom: 4px; }
+  /* cascade: horizontal chain of terminal steps */
+  .chain { display: flex; align-items: stretch; overflow-x: auto; margin-top: 16px; padding-bottom: 4px; }
   .chain-step {
     border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
-    padding: 12px 16px;
+    border-radius: 6px;
+    background: var(--term-bg);
     min-width: 168px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    overflow: hidden;
   }
-  .chain-step .step-title { font-size: 13px; font-weight: 600; }
-  .chain-step .step-latency { font-size: 12px; color: var(--muted); }
-  .chain-arrow { align-self: center; padding: 0 12px; color: var(--muted); flex: none; }
+  .chain-step .step-head {
+    padding: 6px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .chain-step .step-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .chain-step .step-latency { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .chain-arrow { align-self: center; padding: 0 12px; color: var(--muted); flex: none; font-family: var(--mono); }
 
   .round-head {
     display: flex;
     align-items: center;
     gap: 12px;
-    margin: 28px 0 0;
+    margin: 24px 0 0;
+    font-family: var(--mono);
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
@@ -339,26 +404,53 @@
     color: var(--muted);
   }
   .round-head::after { content: ""; flex: 1; height: 1px; background: var(--border); }
-  .round-head:first-of-type { margin-top: 8px; }
+  .round-head:first-of-type { margin-top: 4px; }
 
-  pre {
-    font-family: var(--mono);
-    font-size: 12px;
-    background: var(--bg);
+  /* --- diff: GitHub-style file blocks with gutters and +/- counts --------- */
+  .diff {
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 10px;
-    overflow: auto;
-    max-height: 400px;
-    margin: 0;
-    white-space: pre;
+    overflow: hidden;
+    background: var(--term-bg);
+    font-family: var(--mono);
+    font-size: 12px;
   }
-  pre.diff .diff-line { display: block; }
-  pre.diff .diff-line.add { color: var(--add-fg); background: var(--add-bg); }
-  pre.diff .diff-line.del { color: var(--del-fg); background: var(--del-bg); }
-  pre.diff .diff-line.hunk { color: var(--accent); }
+  .diff + .diff { margin-top: 12px; }
+  .diff-file { border-top: 1px solid var(--border); }
+  .diff-file:first-child { border-top: 0; }
+  .diff-file-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--surface);
+    font-size: 12px;
+  }
+  .diff-file-head .diff-path { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+  .diff-count { font-size: 11px; font-weight: 600; flex: none; }
+  .diff-count.add { color: var(--add-fg); }
+  .diff-count.del { color: var(--del-fg); }
+  .diff-rows { overflow-x: auto; padding: 4px 0; }
+  .diff-row { display: flex; white-space: pre; line-height: 1.5; }
+  .diff-row .gut {
+    flex: none;
+    display: flex;
+    width: 76px;
+    padding: 0 8px 0 0;
+    color: var(--muted);
+    opacity: 0.65;
+    user-select: none;
+    text-align: right;
+  }
+  .diff-row .gut span { width: 34px; display: inline-block; }
+  .diff-row .line-content { flex: 1; padding-right: 12px; }
+  .diff-row.add { background: var(--add-bg); }
+  .diff-row.add .line-content { color: var(--add-fg); }
+  .diff-row.del { background: var(--del-bg); }
+  .diff-row.del .line-content { color: var(--del-fg); }
+  .diff-row.hunk .line-content { color: var(--accent); }
   .diff-toggle {
-    margin-top: 6px;
+    margin: 8px 0 0;
     padding: 4px 12px;
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -372,9 +464,9 @@
 
   .pick-bar { display: flex; gap: 8px; align-items: center; margin-top: 20px; flex-wrap: wrap; }
   .pick-bar button {
-    padding: 7px 18px;
+    padding: 6px 18px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--surface);
     color: var(--fg);
     font: inherit;
@@ -383,9 +475,9 @@
   }
   .pick-bar button:hover { border-color: var(--accent); color: var(--accent); }
   .pick-bar button.pick-main { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-  .pick-bar button.pick-main:hover { filter: brightness(1.06); color: var(--on-accent); }
+  .pick-bar button.pick-main:hover { filter: brightness(1.1); color: var(--on-accent); }
 
-  .done-note { margin-top: 20px; }
+  .done-note { margin-top: 20px; font-family: var(--mono); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -393,7 +485,6 @@
   <aside>
     <div class="brand"><span class="wordmark">modes</span><span class="tag">console</span></div>
     <button type="button" id="new-task-btn">+ New task</button>
-    <div class="section-label">History</div>
     <div class="task-list" id="task-list"></div>
   </aside>
   <main>
@@ -412,7 +503,7 @@
           <textarea id="prompt" placeholder="Give the team a task…" required></textarea>
           <input type="text" id="repo-path" placeholder="Repo path (must be a git repo); empty = cwd of the console" />
           <div class="roster">
-            <span class="section-label" style="padding:0">Team — light the CLIs you want on this</span>
+            <span class="section-label">Team — light the CLIs you want on this</span>
             <div class="cli-chips" id="cli-chips"></div>
           </div>
           <button class="primary" id="run-btn" type="submit">Dispatch</button>
@@ -510,10 +601,11 @@ function relativeTime(iso) {
 }
 
 // --- diff rendering -------------------------------------------------------
-// diffLineClass/renderDiff are pure and would be unit-testable, but the panel
-// is a single buildless file (see top of this script) — extracting them to a
-// JS module would break that constraint, so they stay inline. The logic is
-// deliberately trivial (prefix classification only, no diff grammar).
+// GitHub-style: split a (possibly multi-file) unified diff on `diff --git`
+// into per-file blocks — each with a path header and +/- counters — and
+// render rows with old/new line-number gutters tracked from hunk headers.
+// The logic stays deliberately trivial (prefix classification only, no diff
+// grammar) and inline, because the panel is a single buildless file.
 
 const DIFF_FOLD_LINES = 200;
 
@@ -525,15 +617,58 @@ function diffLineClass(line) {
   return "";
 }
 
+function groupDiffFiles(lines) {
+  const files = [];
+  let current = null;
+  for (const line of lines) {
+    const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+    if (m) {
+      current = { path: m[2], lines: [] };
+      files.push(current);
+      continue;
+    }
+    if (!current) {
+      current = { path: null, lines: [] };
+      files.push(current);
+    }
+    current.lines.push(line);
+  }
+  return files;
+}
+
+function renderDiffFile(file) {
+  let adds = 0, dels = 0;
+  let oldNo = null, newNo = null;
+  const rows = file.lines.map((line) => {
+    const cls = diffLineClass(line);
+    if (cls === "add") adds++;
+    if (cls === "del") dels++;
+    let gOld = "", gNew = "";
+    if (cls === "hunk") {
+      const h = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      if (h) { oldNo = parseInt(h[1], 10); newNo = parseInt(h[2], 10); }
+    } else if (oldNo !== null && !line.startsWith("+++") && !line.startsWith("---")) {
+      if (cls === "add") { gNew = newNo++; }
+      else if (cls === "del") { gOld = oldNo++; }
+      else { gOld = oldNo++; gNew = newNo++; }
+    }
+    return `<span class="diff-row ${cls}"><span class="gut"><span>${gOld}</span><span>${gNew}</span></span>` +
+      `<span class="line-content">${esc(line) || " "}</span></span>`;
+  }).join("\n");
+  const counts = adds || dels
+    ? `<span class="diff-count add">+${adds}</span><span class="diff-count del">−${dels}</span>` : "";
+  return `<div class="diff-file">
+    <div class="diff-file-head"><span class="diff-path">${esc(file.path || "changes")}</span>${counts}</div>
+    <div class="diff-rows">${rows}</div>
+  </div>`;
+}
+
 function renderDiff(diff, key) {
   const lines = diff.split("\n");
   const expanded = state.expandedDiffs.has(key);
   const folded = !expanded && lines.length > DIFF_FOLD_LINES;
   const shown = folded ? lines.slice(0, DIFF_FOLD_LINES) : lines;
-  const html =
-    `<pre class="diff">` +
-    shown.map((l) => `<span class="diff-line ${diffLineClass(l)}">${esc(l)}</span>`).join("\n") +
-    `</pre>`;
+  const html = `<div class="diff">` + groupDiffFiles(shown).map(renderDiffFile).join("") + `</div>`;
   if (lines.length <= DIFF_FOLD_LINES) return html;
   const label = expanded ? "show less" : `show more (${lines.length - DIFF_FOLD_LINES} more lines)`;
   return html + `<button class="diff-toggle" data-diff-key="${esc(key)}">${label}</button>`;
@@ -544,8 +679,8 @@ function outcomeBadge(outcome) {
 }
 
 // --- stage switching --------------------------------------------------------
-// The stage is either the dispatch empty state (brand moment) or the selected
-// task's view. "+ New task" and task selection flip between the two.
+// The stage is either the dispatch empty state or the selected task's view.
+// "+ New task" and task selection flip between the two.
 
 function showStage(which) {
   $("stage-empty").hidden = which !== "empty";
@@ -600,19 +735,50 @@ async function loadClis() {
   renderCliChips();
 }
 
+// --- sidebar: Orca-style workspaces grouped by status ----------------------
+
+const TASK_GROUPS = [
+  ["In progress", (t) => t.status === "running"],
+  ["Needs review", (t) => t.status === "awaiting_pick"],
+  ["Done", (t) => t.status === "done" || t.status === "failed"],
+];
+
+function repoShort(repoPath) {
+  if (!repoPath) return "local";
+  const parts = repoPath.replace(/\/+$/, "").split("/");
+  return parts[parts.length - 1] || "local";
+}
+
+function renderTaskItem(t) {
+  return `
+    <div class="task-item ${t.id === state.selectedId ? "selected" : ""}" data-id="${esc(t.id)}">
+      <div class="ti-top">
+        <span class="repo-badge">${esc(repoShort(t.repoPath))}</span>
+        <span class="prompt">${esc(t.prompt)}</span>
+      </div>
+      <div class="meta">
+        <span class="dot st-${esc(t.status)}"></span>
+        <span class="ti-mode">${esc(t.mode)}${t.classification ? ` <span class="auto-mark">· auto</span>` : ""}</span>
+        <span class="ti-time">${esc(relativeTime(t.createdAt))}</span>
+      </div>
+    </div>`;
+}
+
 async function refreshTaskList() {
   const tasks = await api(apiUrl.tasks());
-  $("task-list").innerHTML = tasks.map((t) => `
-    <div class="task-item ${t.id === state.selectedId ? "selected" : ""}" data-id="${esc(t.id)}">
-      <span class="dot st-${esc(t.status)}"></span>
-      <div class="ti-main">
-        <div class="prompt">${esc(t.prompt)}</div>
-        <div class="meta">
-          <span class="ti-mode">${esc(t.mode)}${t.classification ? ` <span class="auto-mark">· auto</span>` : ""}</span>
-          <span class="muted" style="font-size:11px">${esc(relativeTime(t.createdAt))}</span>
-        </div>
-      </div>
-    </div>`).join("");
+  const box = $("task-list");
+  if (!tasks.length) {
+    box.innerHTML = `<div class="tl-empty">No tasks yet — dispatch one from the stage.</div>`;
+    return;
+  }
+  let html = "";
+  for (const [label, match] of TASK_GROUPS) {
+    const group = tasks.filter(match);
+    if (!group.length) continue;
+    html += `<div class="tl-group-head">${esc(label)} <span class="count">(${group.length})</span></div>`;
+    html += group.map(renderTaskItem).join("");
+  }
+  box.innerHTML = html;
   for (const el of document.querySelectorAll(".task-item")) {
     el.addEventListener("click", () => selectTask(el.dataset.id));
   }
@@ -691,31 +857,34 @@ function renderDetail(task) {
       })()
     : "";
   let html = `
-    <div class="task-head">
-      <h2>${esc(task.prompt)}</h2>
-      <div class="meta">${modeBadge(task)} ${statusBadge(task.status)}
+    <div class="task-bar">
+      <span class="tb-title">${esc(task.prompt)}</span>
+      ${modeBadge(task)} ${statusBadge(task.status)}
+    </div>
+    <div class="task-body">
+      <div class="meta">
         <span class="muted mono">${esc(task.repoPath)}</span>
         <span class="muted">${esc(relativeTime(task.createdAt))}</span>
         <span class="muted mono">${esc(task.id.slice(0, 8))}</span>
       </div>
-    </div>
-    ${classificationBanner}
-    ${task.error ? `<div class="error-box">${esc(task.error)}</div>` : ""}`;
+      ${classificationBanner}
+      ${task.error ? `<div class="error-box">${esc(task.error)}</div>` : ""}`;
 
+  let body = "";
   if (task.status === "running") {
-    html += `<div class="running-note"><span class="dot st-running"></span>Running — the team is on it…</div>`;
+    body = `<div class="running-note"><span class="dot st-running"></span>running — the team is on it…</div>`;
   } else if (task.mode === "compete") {
-    html += renderCompete(task);
+    body = renderCompete(task);
   } else if (task.mode === "cascade") {
-    html += renderCascade(task);
+    body = renderCascade(task);
   } else if (task.mode === "roundtable") {
-    html += renderRoundtable(task);
+    body = renderRoundtable(task);
   } else if (task.mode === "single") {
-    html += renderSingle(task);
+    body = renderSingle(task);
   } else {
-    html += renderBrainstorm(task);
+    body = renderBrainstorm(task);
   }
-  detail.innerHTML = html;
+  detail.innerHTML = html + body + `</div>`;
 
   if (task.status === "awaiting_pick") {
     const picks = task.mode === "cascade"
@@ -750,12 +919,10 @@ function renderCompete(task) {
     </div>`;
   }
   html += `<div class="lanes">` + (task.lanes || []).map((l) => `
-    <div class="lane-card">
-      <header><h3>Lane ${esc(l.lane)}</h3>${outcomeBadge(l.outcome)}</header>
-      <div class="body">
-        <p>${esc(l.summary || "(no summary)")}</p>
-        ${l.diff ? renderDiff(l.diff, `${task.id}:lane-${l.lane}`) : `<p class="muted">(no changes)</p>`}
-      </div>
+    <div class="term">
+      <div class="term-head"><span class="term-name">lane ${esc(String(l.lane).toLowerCase())}</span>${outcomeBadge(l.outcome)}</div>
+      <div class="term-body">${esc(l.summary || "(no summary)")}</div>
+      ${l.diff ? renderDiff(l.diff, `${task.id}:lane-${l.lane}`) : `<div class="term-body muted-body">(no changes)</div>`}
     </div>`).join("") + `</div>`;
   if (task.status === "awaiting_pick") {
     const laneButtons = (task.lanes || [])
@@ -767,7 +934,7 @@ function renderCompete(task) {
       <span class="muted">merges the picked lane into the current branch</span>
     </div>`;
   } else if (task.status === "done") {
-    html += `<p class="muted done-note">Pick recorded — task done.</p>`;
+    html += `<p class="muted done-note">pick recorded — task done.</p>`;
   }
   return html;
 }
@@ -776,17 +943,14 @@ function renderCascade(task) {
   let html = `<div class="chain">` + (task.attempts || []).map((a, i) => `
     ${i > 0 ? `<span class="chain-arrow">→</span>` : ""}
     <div class="chain-step">
-      <span class="step-title">Level ${esc(a.level)} · ${esc(a.cli)}</span>
-      ${outcomeBadge(a.outcome)}
-      <span class="step-latency">${(a.latency / 1000).toFixed(1)}s</span>
+      <div class="step-head">L${esc(a.level)} · ${esc(a.cli)}</div>
+      <div class="step-body">${outcomeBadge(a.outcome)}<span class="step-latency">${(a.latency / 1000).toFixed(1)}s</span></div>
     </div>`).join("") + `</div>`;
   if (task.winner) {
-    html += `<div class="lanes single"><div class="lane-card">
-      <header><h3>Winner — level ${esc(task.winner.level)} (${esc(task.winner.cli)})</h3></header>
-      <div class="body">
-        <p>${esc(task.winner.summary || "(no summary)")}</p>
-        ${task.winner.diff ? renderDiff(task.winner.diff, `${task.id}:winner`) : `<p class="muted">(no changes)</p>`}
-      </div>
+    html += `<div class="lanes single"><div class="term">
+      <div class="term-head"><span class="term-name">winner — L${esc(task.winner.level)} (${esc(task.winner.cli)})</span></div>
+      <div class="term-body">${esc(task.winner.summary || "(no summary)")}</div>
+      ${task.winner.diff ? renderDiff(task.winner.diff, `${task.id}:winner`) : `<div class="term-body muted-body">(no changes)</div>`}
     </div></div>`;
   } else {
     html += `<div class="banner"><span class="verdict">chain exhausted — no output</span>
@@ -799,7 +963,7 @@ function renderCascade(task) {
       <span class="muted">merges the winning level into the current branch</span>
     </div>`;
   } else if (task.status === "done" && task.winner) {
-    html += `<p class="muted done-note">Pick recorded — task done.</p>`;
+    html += `<p class="muted done-note">pick recorded — task done.</p>`;
   }
   return html;
 }
@@ -809,12 +973,10 @@ function renderSingle(task) {
   const l = task.lane;
   if (!l) return `<p class="muted">(no lane result)</p>`;
   let html = `<div class="lanes single">
-    <div class="lane-card">
-      <header><h3>${esc(l.cli)}</h3>${outcomeBadge(l.outcome)}</header>
-      <div class="body">
-        <p>${esc(l.summary || "(no summary)")}</p>
-        ${l.diff ? renderDiff(l.diff, `${task.id}:single`) : `<p class="muted">(no changes)</p>`}
-      </div>
+    <div class="term">
+      <div class="term-head"><span class="term-name">${esc(l.cli)}</span>${outcomeBadge(l.outcome)}</div>
+      <div class="term-body">${esc(l.summary || "(no summary)")}</div>
+      ${l.diff ? renderDiff(l.diff, `${task.id}:single`) : `<div class="term-body muted-body">(no changes)</div>`}
     </div></div>`;
   if (task.status === "awaiting_pick") {
     html += `<div class="pick-bar">
@@ -823,7 +985,7 @@ function renderSingle(task) {
       <span class="muted">merges the lane's diff into the current branch</span>
     </div>`;
   } else if (task.status === "done" && l.outcome === "success" && l.diff) {
-    html += `<p class="muted done-note">Pick recorded — task done.</p>`;
+    html += `<p class="muted done-note">pick recorded — task done.</p>`;
   } else if (task.status === "done" && l.outcome !== "success") {
     html += `<div class="banner"><span class="verdict">lane failed — nothing to merge</span>
       <div class="muted">single is one shot: there is no fallback level, the failure is reported as-is.</div></div>`;
@@ -833,15 +995,15 @@ function renderSingle(task) {
 
 function renderBrainstorm(task) {
   let html = `<div class="lanes single">` + (task.lanes || []).map((l) => `
-    <div class="lane-card">
-      <header><h3>Lane ${esc(l.lane)}</h3>${outcomeBadge(l.outcome)}</header>
-      <div class="body"><p>${esc(l.answer || "(no answer)")}</p></div>
+    <div class="term">
+      <div class="term-head"><span class="term-name">lane ${esc(String(l.lane).toLowerCase())}</span>${outcomeBadge(l.outcome)}</div>
+      <div class="term-body">${esc(l.answer || "(no answer)")}</div>
     </div>`).join("") + `</div>`;
   if (task.synthesis) {
     html += `<div class="banner"><span class="banner-label">synthesis</span>
       <div class="muted" style="white-space:pre-wrap">${esc(task.synthesis)}</div></div>`;
   } else if (task.status === "done") {
-    html += `<p class="muted done-note">Synthesis skipped — all lanes failed.</p>`;
+    html += `<p class="muted done-note">synthesis skipped — all lanes failed.</p>`;
   }
   return html;
 }
@@ -852,11 +1014,11 @@ function renderRoundtable(task) {
   const rounds = task.rounds || [];
   let html = "";
   rounds.forEach((r, i) => {
-    html += `<div class="round-head">Round ${esc(r.round)}</div>`;
+    html += `<div class="round-head">round ${esc(r.round)}</div>`;
     html += `<div class="lanes">` + (r.lanes || []).map((l) => `
-      <div class="lane-card">
-        <header><h3>${esc(l.cli)}</h3>${outcomeBadge(l.outcome)}</header>
-        <div class="body"><p>${esc(l.answer || "(no answer)")}</p></div>
+      <div class="term">
+        <div class="term-head"><span class="term-name">${esc(l.cli)}</span>${outcomeBadge(l.outcome)}</div>
+        <div class="term-body">${esc(l.answer || "(no answer)")}</div>
       </div>`).join("") + `</div>`;
     if (task.consensus && i === rounds.length - 1) {
       html += `<div class="banner"><span class="verdict">consensus reached</span>
@@ -870,7 +1032,7 @@ function renderRoundtable(task) {
     html += `<div class="banner"><span class="banner-label">synthesis</span>
       <div class="muted" style="white-space:pre-wrap">${esc(task.synthesis)}</div></div>`;
   } else if (task.status === "done") {
-    html += `<p class="muted done-note">Synthesis skipped — all lanes failed.</p>`;
+    html += `<p class="muted done-note">synthesis skipped — all lanes failed.</p>`;
   }
   return html;
 }
