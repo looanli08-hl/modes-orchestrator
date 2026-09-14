@@ -46,6 +46,14 @@
     font: inherit; cursor: pointer;
   }
   .mode-toggle button.active { background: var(--surface); color: var(--fg); font-weight: 600; }
+  .cli-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cli-chips .label { color: var(--muted); font-size: 12px; align-self: center; margin-right: 2px; }
+  .cli-chip {
+    padding: 3px 12px; border: 1px solid var(--border); border-radius: 12px;
+    background: var(--bg); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .cli-chip.on { background: var(--fg); border-color: var(--fg); color: #fff; font-weight: 500; }
+  .cli-chip:disabled { opacity: 0.45; cursor: default; }
   textarea, input[type="text"] {
     width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
     font: inherit; background: var(--bg); color: var(--fg);
@@ -140,7 +148,9 @@
         <button type="button" id="mode-compete">compete</button>
         <button type="button" id="mode-brainstorm">brainstorm</button>
         <button type="button" id="mode-cascade">cascade</button>
+        <button type="button" id="mode-roundtable">roundtable</button>
       </div>
+      <div class="cli-chips" id="cli-chips"></div>
       <textarea id="prompt" placeholder="Describe the task…" required></textarea>
       <input type="text" id="repo-path" placeholder="Repo path (must be a git repo); empty = cwd of the console" />
       <button class="primary" id="run-btn" type="submit">Run</button>
@@ -170,6 +180,8 @@ const TOKEN = typeof window.MODES_TOKEN === "string" ? window.MODES_TOKEN : null
 const VIA_EXTENSION_PROXY = API_BASE === "/modes-console/api";
 const apiUrl = {
   tasks: () => `${API_BASE}/tasks`,
+  // no /clis route on the extension proxy — the chips fall back to a static list there
+  clis: () => `${API_BASE}/clis`,
   task: (id) =>
     VIA_EXTENSION_PROXY ? `${API_BASE}/task?id=${encodeURIComponent(id)}` : `${API_BASE}/tasks/${encodeURIComponent(id)}`,
   pick: (id) =>
@@ -183,12 +195,20 @@ const apiUrl = {
 
 const TERMINAL_STATUSES = new Set(["awaiting_pick", "done", "failed"]);
 
+// CLI chips: the core interaction — 点亮几个 CLI = 雇几个员工协作. The list
+// comes from GET /api/clis (server probes PATH); unavailable CLIs render grey.
+const DEFAULT_LIT_CLIS = ["kimi", "qwen"];
+const FALLBACK_CLIS = ["kimi", "qwen", "iflow", "claude", "codex"].map((name) => ({ name, available: true }));
+
 const state = {
   mode: "auto",
   selectedId: null,
   pollTimer: null,
   eventSource: null,
   lastTask: null,
+  // [{name, available}] from /api/clis; selected = the lit chips
+  clis: [],
+  selectedClis: new Set(),
   // diff fold state survives re-renders: key = "<taskId>:<lane|winner>"
   expandedDiffs: new Set(),
 };
@@ -260,6 +280,45 @@ function renderDiff(diff, key) {
 
 function outcomeBadge(outcome) {
   return `<span class="badge ${outcome === "success" ? "ok" : "bad"}">${esc(outcome)}</span>`;
+}
+
+// --- CLI chips ------------------------------------------------------------
+
+function renderCliChips() {
+  const box = $("cli-chips");
+  if (!state.clis.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<span class="label">clis</span>` + state.clis.map((c) => {
+    const on = state.selectedClis.has(c.name);
+    const disabled = c.available ? "" : "disabled";
+    const title = c.available ? (on ? "lit — click to dismiss" : "click to hire") : "not installed / unavailable";
+    return `<button type="button" class="cli-chip ${on ? "on" : ""}" data-cli="${esc(c.name)}" ${disabled} title="${esc(title)}">${esc(c.name)}</button>`;
+  }).join("");
+  for (const el of box.querySelectorAll(".cli-chip:not([disabled])")) {
+    el.addEventListener("click", () => {
+      const name = el.dataset.cli;
+      if (state.selectedClis.has(name)) state.selectedClis.delete(name);
+      else state.selectedClis.add(name);
+      renderCliChips();
+    });
+  }
+}
+
+async function loadClis() {
+  try {
+    state.clis = await api(apiUrl.clis());
+  } catch {
+    state.clis = FALLBACK_CLIS; // older server or the extension proxy: no probe route
+  }
+  for (const name of DEFAULT_LIT_CLIS) {
+    const cli = state.clis.find((c) => c.name === name);
+    if (cli?.available) state.selectedClis.add(name);
+  }
+  // never start with an empty table when something usable is installed
+  if (state.selectedClis.size === 0) {
+    const first = state.clis.find((c) => c.available);
+    if (first) state.selectedClis.add(first.name);
+  }
+  renderCliChips();
 }
 
 async function refreshTaskList() {
@@ -350,6 +409,8 @@ function renderDetail(task) {
     html += renderCompete(task);
   } else if (task.mode === "cascade") {
     html += renderCascade(task);
+  } else if (task.mode === "roundtable") {
+    html += renderRoundtable(task);
   } else {
     html += renderBrainstorm(task);
   }
@@ -452,6 +513,35 @@ function renderBrainstorm(task) {
   return html;
 }
 
+// roundtable: rounds of cross-seeing debate — round card groups separated by
+// the consensus verdict that decided whether the debate continued
+function renderRoundtable(task) {
+  const rounds = task.rounds || [];
+  let html = "";
+  rounds.forEach((r, i) => {
+    html += `<h2 style="margin-top:${i === 0 ? "8px" : "24px"}">Round ${esc(r.round)}</h2>`;
+    html += `<div class="lanes">` + (r.lanes || []).map((l) => `
+      <div class="lane-card">
+        <header><h3>${esc(l.cli)}</h3>${outcomeBadge(l.outcome)}</header>
+        <div class="body"><p>${esc(l.answer || "(no answer)")}</p></div>
+      </div>`).join("") + `</div>`;
+    if (task.consensus && i === rounds.length - 1) {
+      html += `<div class="banner"><span class="verdict">consensus reached</span>
+        <div class="muted">the reviewer judged the positions substantively identical — the debate stopped early.</div></div>`;
+    } else if (i < rounds.length - 1) {
+      html += `<div class="banner"><span class="verdict">no consensus</span>
+        <div class="muted">real differences remained — the table continued into round ${esc(rounds[i + 1].round)}.</div></div>`;
+    }
+  });
+  if (task.synthesis) {
+    html += `<div class="banner"><div class="verdict">synthesis</div>
+      <div class="muted" style="white-space:pre-wrap">${esc(task.synthesis)}</div></div>`;
+  } else if (task.status === "done") {
+    html += `<p class="muted" style="margin-top:16px">Synthesis skipped — all lanes failed.</p>`;
+  }
+  return html;
+}
+
 async function applyPick(id, pick) {
   stopFollowing(); // the pick resolves the task; no more progress to follow
   try {
@@ -475,27 +565,38 @@ function setMode(mode) {
   $("mode-compete").classList.toggle("active", mode === "compete");
   $("mode-brainstorm").classList.toggle("active", mode === "brainstorm");
   $("mode-cascade").classList.toggle("active", mode === "cascade");
-  // brainstorm needs no git repo; compete and cascade both run in worktrees of
-  // one; auto may route anywhere, so keep the field (ignored on brainstorm)
-  $("repo-path").style.display = mode === "brainstorm" ? "none" : "";
+  $("mode-roundtable").classList.toggle("active", mode === "roundtable");
+  // brainstorm and roundtable need no git repo (thinking, not commits); compete
+  // and cascade run in worktrees of one; auto may route anywhere, so keep the
+  // field (ignored on the thinking modes)
+  $("repo-path").style.display = mode === "brainstorm" || mode === "roundtable" ? "none" : "";
 }
 
 $("mode-auto").addEventListener("click", () => setMode("auto"));
 $("mode-compete").addEventListener("click", () => setMode("compete"));
 $("mode-brainstorm").addEventListener("click", () => setMode("brainstorm"));
 $("mode-cascade").addEventListener("click", () => setMode("cascade"));
+$("mode-roundtable").addEventListener("click", () => setMode("roundtable"));
 
 $("run-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const prompt = $("prompt").value.trim();
   if (!prompt) return;
   const repoPath = $("repo-path").value.trim();
+  // the panel only sends the lit chips; the server maps clis onto each mode's
+  // engine shape (lane letters for compete/brainstorm, chain order for cascade)
+  const clis = [...state.selectedClis];
   $("run-btn").disabled = true;
   try {
     const { id } = await api(apiUrl.tasks(), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: state.mode, prompt, ...(repoPath ? { repoPath } : {}) }),
+      body: JSON.stringify({
+        mode: state.mode,
+        prompt,
+        ...(clis.length ? { clis } : {}),
+        ...(repoPath ? { repoPath } : {}),
+      }),
     });
     $("prompt").value = "";
     await refreshTaskList();
@@ -508,6 +609,7 @@ $("run-form").addEventListener("submit", async (e) => {
 });
 
 setMode("auto");
+loadClis();
 refreshTaskList();
 </script>
 </body>

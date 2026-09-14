@@ -22,6 +22,7 @@ import type { UserPick } from '../gate/userGate';
 import type { CascadeLevel } from '../patterns/cascade';
 import type { ReviewVerdict } from '../review/crossReview';
 import { classifyTask, type TaskClassification } from '../router/classifyTask';
+import { detectClis as probeClis, type CliAvailability } from '../spawn/detectClis';
 import {
   createTaskRegistry,
   isUserPick,
@@ -31,8 +32,15 @@ import {
   type CompeteLaneState,
   type ConsoleTask,
   type ConsoleTaskMode,
+  type RoundtableRoundState,
   type TaskRegistry,
 } from './taskRegistry';
+
+/** one lit CLI chip = one lane at the table (letters assigned in chip order) */
+export interface ConsoleLaneSpec {
+  lane: string;
+  cli: string;
+}
 
 export interface CompeteEngineResult {
   taskId: string;
@@ -56,6 +64,14 @@ export interface CascadeEngineResult {
   eventsFile: string;
 }
 
+export interface RoundtableEngineResult {
+  taskId: string;
+  rounds: RoundtableRoundState[];
+  consensus: boolean;
+  synthesis: string | null;
+  eventsFile: string;
+}
+
 export interface ConsoleDeps {
   /**
    * Bearer token gating /api/* (header: x-modes-token). When set, every API
@@ -64,9 +80,21 @@ export interface ConsoleDeps {
    * same-origin/loopback readers only). Unset = legacy open behavior.
    */
   token?: string;
-  runCompete(options: { repoPath: string; prompt: string }): Promise<CompeteEngineResult>;
-  runBrainstormTask(options: { workDir: string; prompt: string }): Promise<BrainstormEngineResult>;
+  runCompete(options: { repoPath: string; prompt: string; lanes?: ConsoleLaneSpec[] }): Promise<CompeteEngineResult>;
+  runBrainstormTask(options: {
+    workDir: string;
+    prompt: string;
+    lanes?: ConsoleLaneSpec[];
+  }): Promise<BrainstormEngineResult>;
   runCascadeTask(options: { repoPath: string; prompt: string; chain: CascadeLevel[] }): Promise<CascadeEngineResult>;
+  runRoundtableTask(options: { workDir: string; prompt: string; clis: string[] }): Promise<RoundtableEngineResult>;
+  /**
+   * Probe which orchestratable CLIs are installed (GET /api/clis). Injectable
+   * for tests; defaults to the PATH-based probe in spawn/detectClis. Results
+   * are cached in-process — probing is not cheap and installs rarely change
+   * while the console runs.
+   */
+  detectClis?: () => Promise<CliAvailability[]>;
   recordPick(
     eventsFile: string,
     options: { taskId: string; pick: UserPick; reviewVerdict: ReviewVerdict['verdict'] | null }
@@ -86,6 +114,19 @@ const PANEL_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 
 /** cheapest first — same default as modes-run.ts --mode cascade */
 const DEFAULT_CASCADE_CHAIN: CascadeLevel[] = [{ cli: 'qwen' }, { cli: 'kimi' }];
+
+/** default table when a roundtable request omits clis */
+const DEFAULT_ROUNDTABLE_CLIS = ['kimi', 'qwen'];
+
+/** lanes are lettered A, B, C… in chip order (same convention as modes-run.ts) */
+function laneLetter(index: number): string {
+  return String.fromCharCode(65 + index);
+}
+
+/** a request-body clis override must be a non-empty list of CLI names */
+function isCliList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every((cli) => typeof cli === 'string' && cli.trim());
+}
 
 /** a request-body chain override must be a non-empty list of {cli, timeoutMs?} entries */
 function isCascadeChain(value: unknown): value is CascadeLevel[] {
@@ -223,6 +264,14 @@ function taskDetailView(task: ConsoleTask): Record<string, unknown> {
       winner: winner ? { level: winner.level, cli: winner.cli, summary: winner.summary, diff: winner.diff } : null,
     };
   }
+  if (task.mode === 'roundtable') {
+    return {
+      ...base,
+      rounds: task.roundtable?.rounds ?? [],
+      consensus: task.roundtable?.consensus ?? false,
+      synthesis: task.roundtable?.synthesis ?? null,
+    };
+  }
   return {
     ...base,
     lanes: task.brainstorm?.lanes ?? [],
@@ -233,18 +282,39 @@ function taskDetailView(task: ConsoleTask): Record<string, unknown> {
 export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOptions = {}): http.Server {
   const registry = options.registry ?? createTaskRegistry();
   const panelPath = options.panelPath ?? PANEL_PATH;
+  // probing PATH is not cheap and installs rarely change mid-session; a failed
+  // probe is never cached so the next request retries
+  let clisCache: CliAvailability[] | null = null;
 
-  const runTaskInBackground = (task: ConsoleTask, chain?: CascadeLevel[]): void => {
+  const runTaskInBackground = (task: ConsoleTask, runOptions: { chain?: CascadeLevel[]; clis?: string[] } = {}): void => {
+    const { chain, clis } = runOptions;
+    // the panel only ever sends clis; the mapping onto each mode's engine
+    // shape (letters for lanes, order for the cascade chain) lives here
+    const lanes = clis?.map((cli, i) => ({ lane: laneLetter(i), cli }));
     const run =
       task.mode === 'compete'
-        ? deps.runCompete({ repoPath: task.repoPath, prompt: task.prompt }).then((r) => registry.completeCompete(task.id, r))
+        ? deps
+            .runCompete({ repoPath: task.repoPath, prompt: task.prompt, ...(lanes ? { lanes } : {}) })
+            .then((r) => registry.completeCompete(task.id, r))
         : task.mode === 'cascade'
           ? deps
-              .runCascadeTask({ repoPath: task.repoPath, prompt: task.prompt, chain: chain ?? DEFAULT_CASCADE_CHAIN })
+              .runCascadeTask({
+                repoPath: task.repoPath,
+                prompt: task.prompt,
+                chain: chain ?? clis?.map((cli) => ({ cli })) ?? DEFAULT_CASCADE_CHAIN,
+              })
               .then((r) => registry.completeCascade(task.id, r))
-          : deps
-              .runBrainstormTask({ workDir: task.repoPath, prompt: task.prompt })
-              .then((r) => registry.completeBrainstorm(task.id, r));
+          : task.mode === 'roundtable'
+            ? deps
+                .runRoundtableTask({
+                  workDir: task.repoPath,
+                  prompt: task.prompt,
+                  clis: clis ?? DEFAULT_ROUNDTABLE_CLIS,
+                })
+                .then((r) => registry.completeRoundtable(task.id, r))
+            : deps
+                .runBrainstormTask({ workDir: task.repoPath, prompt: task.prompt, ...(lanes ? { lanes } : {}) })
+                .then((r) => registry.completeBrainstorm(task.id, r));
     run.catch((err) => registry.fail(task.id, err));
   };
 
@@ -255,9 +325,9 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     } catch {
       return sendJson(res, 400, { error: 'invalid JSON body' });
     }
-    const { mode, prompt, repoPath, chain } = (body ?? {}) as Record<string, unknown>;
-    if (mode !== 'compete' && mode !== 'brainstorm' && mode !== 'cascade' && mode !== 'auto') {
-      return sendJson(res, 400, { error: "mode must be 'compete', 'brainstorm', 'cascade' or 'auto'" });
+    const { mode, prompt, repoPath, chain, clis } = (body ?? {}) as Record<string, unknown>;
+    if (mode !== 'compete' && mode !== 'brainstorm' && mode !== 'cascade' && mode !== 'roundtable' && mode !== 'auto') {
+      return sendJson(res, 400, { error: "mode must be 'compete', 'brainstorm', 'cascade', 'roundtable' or 'auto'" });
     }
     if (typeof prompt !== 'string' || !prompt.trim()) {
       return sendJson(res, 400, { error: 'prompt must be a non-empty string' });
@@ -268,6 +338,9 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     if (chain !== undefined && !isCascadeChain(chain)) {
       return sendJson(res, 400, { error: 'chain must be a non-empty array of { cli: string, timeoutMs?: number }' });
     }
+    if (clis !== undefined && !isCliList(clis)) {
+      return sendJson(res, 400, { error: 'clis must be a non-empty array of CLI names' });
+    }
     // auto resolves synchronously (classifyTask is a pure function): the task is
     // created and run under the resolved mode, and the decision is kept on the
     // record so the panel can show "auto → <mode> · <reason>"
@@ -275,7 +348,7 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     const resolvedMode: ConsoleTaskMode = classification ? classification.mode : (mode as ConsoleTaskMode);
     // like modes-run.ts: no repoPath means "the directory the console was started from"
     const task = registry.create(resolvedMode, prompt, path.resolve(repoPath ?? process.cwd()), classification);
-    runTaskInBackground(task, chain);
+    runTaskInBackground(task, { chain, clis });
     sendJson(res, 201, { id: task.id });
   };
 
@@ -387,6 +460,10 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
         return res.end(html);
       }
       if (req.method === 'POST' && url.pathname === '/api/tasks') return await handleCreateTask(req, res);
+      if (req.method === 'GET' && url.pathname === '/api/clis') {
+        clisCache ??= await (deps.detectClis ?? probeClis)();
+        return sendJson(res, 200, clisCache);
+      }
       if (req.method === 'GET' && url.pathname === '/api/tasks') return sendJson(res, 200, registry.list());
       if (req.method === 'GET' && taskMatch) {
         const task = registry.get(decodeURIComponent(taskMatch[1]));

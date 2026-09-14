@@ -20,6 +20,7 @@ import {
   type CascadeEngineResult,
   type CompeteEngineResult,
   type ConsoleDeps,
+  type RoundtableEngineResult,
 } from '../src/server/consoleServer';
 
 interface Deferred<T> {
@@ -89,18 +90,56 @@ function makeCascadeResult(winnerLevel: number | null = 1): CascadeEngineResult 
   return { taskId: 'task-eng-3', attempts, winner, eventsFile: '/tmp/events.jsonl' };
 }
 
+/**
+ * Two rounds by default: round 1 ended without consensus (the reviewer's NO is
+ * why round 2 exists), round 2 holds the revised answers. consensus/synthesis
+ * are parameters so the early-stop and all-failed shapes are one call away.
+ */
+function makeRoundtableResult(overrides: Partial<RoundtableEngineResult> = {}): RoundtableEngineResult {
+  return {
+    taskId: 'task-eng-4',
+    rounds: [
+      {
+        round: 1,
+        lanes: [
+          { cli: 'kimi', outcome: 'success', answer: 'r1 kimi' },
+          { cli: 'qwen', outcome: 'success', answer: 'r1 qwen' },
+        ],
+      },
+      {
+        round: 2,
+        lanes: [
+          { cli: 'kimi', outcome: 'success', answer: 'r2 kimi' },
+          { cli: 'qwen', outcome: 'success', answer: 'r2 qwen' },
+        ],
+      },
+    ],
+    consensus: false,
+    synthesis: 'combined after debate',
+    eventsFile: '/tmp/events.jsonl',
+    ...overrides,
+  };
+}
+
 function makeFakeDeps() {
   const compete = deferred<CompeteEngineResult>();
   const brainstorm = deferred<BrainstormEngineResult>();
   const cascade = deferred<CascadeEngineResult>();
+  const roundtable = deferred<RoundtableEngineResult>();
   const deps: ConsoleDeps = {
     runCompete: vi.fn(() => compete.promise),
     runBrainstormTask: vi.fn(() => brainstorm.promise),
     runCascadeTask: vi.fn(() => cascade.promise),
+    runRoundtableTask: vi.fn(() => roundtable.promise),
+    detectClis: vi.fn(async () => [
+      { name: 'kimi', available: true },
+      { name: 'qwen', available: true },
+      { name: 'iflow', available: false },
+    ]),
     recordPick: vi.fn(async () => {}),
     mergeLane: vi.fn(async () => {}),
   };
-  return { deps, compete, brainstorm, cascade };
+  return { deps, compete, brainstorm, cascade, roundtable };
 }
 
 const servers: Server[] = [];
@@ -623,6 +662,208 @@ describe('cascade flow', () => {
     });
     expect(deps.mergeLane).not.toHaveBeenCalled();
     expect((await getTask(baseUrl, id)).status).toBe('done');
+  });
+});
+
+describe('roundtable flow', () => {
+  it('runs running → done and exposes rounds + consensus + synthesis', async () => {
+    const { deps, roundtable } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+
+    const res = await postJson(baseUrl, '/api/tasks', { mode: 'roundtable', prompt: 'discuss it' });
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    expect((await getTask(baseUrl, id)).status).toBe('running');
+    // no clis in the request → the server default table
+    expect(deps.runRoundtableTask).toHaveBeenCalledWith({
+      workDir: process.cwd(),
+      prompt: 'discuss it',
+      clis: ['kimi', 'qwen'],
+    });
+
+    roundtable.resolve(makeRoundtableResult());
+    await waitForStatus(baseUrl, id, 'done');
+
+    const task = await getTask(baseUrl, id);
+    expect(task.mode).toBe('roundtable');
+    expect(task.engineTaskId).toBe('task-eng-4');
+    expect(task.consensus).toBe(false);
+    expect(task.synthesis).toBe('combined after debate');
+    const rounds = task.rounds as { round: number; lanes: Record<string, unknown>[] }[];
+    expect(rounds).toHaveLength(2);
+    expect(rounds[0].round).toBe(1);
+    expect(rounds[0].lanes).toEqual([
+      { cli: 'kimi', outcome: 'success', answer: 'r1 kimi' },
+      { cli: 'qwen', outcome: 'success', answer: 'r1 qwen' },
+    ]);
+    expect(rounds[1].lanes[0]).toMatchObject({ cli: 'kimi', answer: 'r2 kimi' });
+
+    const list = (await (await fetch(`${baseUrl}/api/tasks`)).json()) as Record<string, unknown>[];
+    expect(list[0]).toMatchObject({ id, mode: 'roundtable', status: 'done' });
+  });
+
+  it('passes a request-body clis list through to the engine', async () => {
+    const { deps, roundtable } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    await postJson(baseUrl, '/api/tasks', { mode: 'roundtable', prompt: 'x', clis: ['kimi', 'qwen', 'iflow'] });
+    expect(deps.runRoundtableTask).toHaveBeenCalledWith({
+      workDir: process.cwd(),
+      prompt: 'x',
+      clis: ['kimi', 'qwen', 'iflow'],
+    });
+    roundtable.resolve(makeRoundtableResult());
+  });
+
+  it('rejects a malformed clis list with 400', async () => {
+    const baseUrl = await startServer(makeFakeDeps().deps);
+    for (const clis of [[], 'kimi,qwen', [5], [''], ['kimi', ' ']]) {
+      // oxlint-disable-next-line no-await-in-loop -- sequential requests keep the assertions ordered and readable
+      const res = await postJson(baseUrl, '/api/tasks', { mode: 'roundtable', prompt: 'x', clis });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it('early-consensus shape: one round, consensus true, still done', async () => {
+    const { deps, roundtable } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const res = await postJson(baseUrl, '/api/tasks', { mode: 'roundtable', prompt: 'quick agree' });
+    const { id } = (await res.json()) as { id: string };
+
+    roundtable.resolve(
+      makeRoundtableResult({ rounds: [makeRoundtableResult().rounds[0]], consensus: true, synthesis: 'agreed position' })
+    );
+    await waitForStatus(baseUrl, id, 'done');
+
+    const task = await getTask(baseUrl, id);
+    expect(task.consensus).toBe(true);
+    expect(task.rounds).toHaveLength(1);
+    expect(task.synthesis).toBe('agreed position');
+  });
+
+  it('rejects a pick on a roundtable task with 409', async () => {
+    const { deps, roundtable } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const res = await postJson(baseUrl, '/api/tasks', { mode: 'roundtable', prompt: 'discuss' });
+    const { id } = (await res.json()) as { id: string };
+    roundtable.resolve(makeRoundtableResult());
+    await waitForStatus(baseUrl, id, 'done');
+
+    const pickRes = await postJson(baseUrl, `/api/tasks/${id}/pick`, { pick: 'kimi' });
+    expect(pickRes.status).toBe(409);
+  });
+});
+
+describe('clis mapping onto other modes', () => {
+  it('compete: clis become lettered lanes in chip order', async () => {
+    const { deps, compete } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    await postJson(baseUrl, '/api/tasks', { mode: 'compete', prompt: 'x', repoPath: '/repo', clis: ['a', 'b', 'c'] });
+    expect(deps.runCompete).toHaveBeenCalledWith({
+      repoPath: '/repo',
+      prompt: 'x',
+      lanes: [
+        { lane: 'A', cli: 'a' },
+        { lane: 'B', cli: 'b' },
+        { lane: 'C', cli: 'c' },
+      ],
+    });
+    compete.resolve(makeCompeteResult());
+  });
+
+  it('brainstorm: clis become lettered lanes; omitted clis keeps the old call shape', async () => {
+    const { deps, brainstorm } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    await postJson(baseUrl, '/api/tasks', { mode: 'brainstorm', prompt: 'x', clis: ['qwen', 'kimi'] });
+    expect(deps.runBrainstormTask).toHaveBeenCalledWith({
+      workDir: process.cwd(),
+      prompt: 'x',
+      lanes: [
+        { lane: 'A', cli: 'qwen' },
+        { lane: 'B', cli: 'kimi' },
+      ],
+    });
+    brainstorm.resolve(makeBrainstormResult());
+
+    await postJson(baseUrl, '/api/tasks', { mode: 'brainstorm', prompt: 'y' });
+    expect(deps.runBrainstormTask).toHaveBeenLastCalledWith({ workDir: process.cwd(), prompt: 'y' });
+    brainstorm.resolve(makeBrainstormResult());
+  });
+
+  it('cascade: clis become the chain in chip order; an explicit chain wins over clis', async () => {
+    const { deps, cascade } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    await postJson(baseUrl, '/api/tasks', { mode: 'cascade', prompt: 'x', repoPath: '/repo', clis: ['kimi', 'iflow'] });
+    expect(deps.runCascadeTask).toHaveBeenCalledWith({
+      repoPath: '/repo',
+      prompt: 'x',
+      chain: [{ cli: 'kimi' }, { cli: 'iflow' }],
+    });
+    cascade.resolve(makeCascadeResult(1));
+
+    const chain = [{ cli: 'solo', timeoutMs: 1000 }];
+    await postJson(baseUrl, '/api/tasks', { mode: 'cascade', prompt: 'x', repoPath: '/repo', clis: ['kimi'], chain });
+    expect(deps.runCascadeTask).toHaveBeenLastCalledWith({ repoPath: '/repo', prompt: 'x', chain });
+    cascade.resolve(makeCascadeResult(1));
+  });
+
+  it('auto: clis follow the resolved mode (brainstorm lanes here)', async () => {
+    const { deps, brainstorm } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    await postJson(baseUrl, '/api/tasks', { mode: 'auto', prompt: '你怎么看这个方案', clis: ['iflow', 'kimi'] });
+    expect(deps.runBrainstormTask).toHaveBeenCalledWith({
+      workDir: process.cwd(),
+      prompt: '你怎么看这个方案',
+      lanes: [
+        { lane: 'A', cli: 'iflow' },
+        { lane: 'B', cli: 'kimi' },
+      ],
+    });
+    brainstorm.resolve(makeBrainstormResult());
+  });
+});
+
+describe('GET /api/clis', () => {
+  it('returns the probe result (available and unavailable CLIs)', async () => {
+    const { deps } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    const res = await fetch(`${baseUrl}/api/clis`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([
+      { name: 'kimi', available: true },
+      { name: 'qwen', available: true },
+      { name: 'iflow', available: false },
+    ]);
+  });
+
+  it('caches the probe result in-process (one probe for many requests)', async () => {
+    const { deps } = makeFakeDeps();
+    const baseUrl = await startServer(deps);
+    await fetch(`${baseUrl}/api/clis`);
+    await fetch(`${baseUrl}/api/clis`);
+    await fetch(`${baseUrl}/api/clis`);
+    expect(deps.detectClis).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed probe (e.g. timeout) is a 500 and is never cached — the next request retries', async () => {
+    const { deps } = makeFakeDeps();
+    vi.mocked(deps.detectClis!)
+      .mockRejectedValueOnce(new Error('probe timed out'))
+      .mockResolvedValue([{ name: 'kimi', available: true }]);
+    const baseUrl = await startServer(deps);
+
+    const failed = await fetch(`${baseUrl}/api/clis`);
+    expect(failed.status).toBe(500);
+    expect(((await failed.json()) as { error: string }).error).toContain('probe timed out');
+
+    const retried = await fetch(`${baseUrl}/api/clis`);
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toEqual([{ name: 'kimi', available: true }]);
+    expect(deps.detectClis).toHaveBeenCalledTimes(2);
+  });
+
+  it('is gated by the token like every other /api/* route', async () => {
+    const baseUrl = await startServer({ ...makeFakeDeps().deps, token: 'tok' });
+    expect((await fetch(`${baseUrl}/api/clis`)).status).toBe(401);
   });
 });
 

@@ -17,7 +17,7 @@ import type { UserPick } from '../gate/userGate';
 import type { ReviewVerdict } from '../review/crossReview';
 import type { TaskClassification } from '../router/classifyTask';
 
-export type ConsoleTaskMode = 'compete' | 'brainstorm' | 'cascade';
+export type ConsoleTaskMode = 'compete' | 'brainstorm' | 'cascade' | 'roundtable';
 export type ConsoleTaskStatus = 'running' | 'awaiting_pick' | 'done' | 'failed';
 
 export interface CompeteLaneState {
@@ -51,6 +51,17 @@ export interface CascadeWinnerState {
   branch: string;
 }
 
+export interface RoundtableLaneState {
+  cli: string;
+  outcome: string;
+  answer: string;
+}
+
+export interface RoundtableRoundState {
+  round: number;
+  lanes: RoundtableLaneState[];
+}
+
 export interface ConsoleTask {
   /** console-assigned id — the engine only hands back its taskId when the run finishes */
   id: string;
@@ -68,6 +79,7 @@ export interface ConsoleTask {
   compete: { lanes: CompeteLaneState[]; review: ReviewVerdict | null } | null;
   brainstorm: { lanes: BrainstormLaneState[]; synthesis: string | null } | null;
   cascade: { attempts: CascadeAttemptState[]; winner: CascadeWinnerState | null } | null;
+  roundtable: { rounds: RoundtableRoundState[]; consensus: boolean; synthesis: string | null } | null;
 }
 
 export interface ConsoleTaskSummary {
@@ -100,6 +112,16 @@ export interface TaskRegistry {
   completeCascade(
     id: string,
     result: { taskId: string; attempts: CascadeAttemptState[]; winner: CascadeWinnerState | null; eventsFile: string }
+  ): void;
+  completeRoundtable(
+    id: string,
+    result: {
+      taskId: string;
+      rounds: RoundtableRoundState[];
+      consensus: boolean;
+      synthesis: string | null;
+      eventsFile: string;
+    }
   ): void;
   /** engine threw — terminal state with the message surfaced to the panel */
   fail(id: string, error: unknown): void;
@@ -220,6 +242,7 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
         compete: null,
         brainstorm: null,
         cascade: null,
+        roundtable: null,
       };
       tasks.set(task.id, task);
       changed(task);
@@ -272,6 +295,16 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
       // a winner leaves the merge decision to the human; an exhausted chain is
       // terminal on its own — the failure is presented honestly, never fabricated
       task.status = result.winner ? 'awaiting_pick' : 'done';
+      changed(task);
+    },
+
+    completeRoundtable(id, result) {
+      const task = requireTask(id);
+      task.engineTaskId = result.taskId;
+      task.eventsFile = result.eventsFile;
+      task.roundtable = { rounds: result.rounds, consensus: result.consensus, synthesis: result.synthesis };
+      // thinking produces text, not commits — no gate, no pick (same as brainstorm)
+      task.status = 'done';
       changed(task);
     },
 
