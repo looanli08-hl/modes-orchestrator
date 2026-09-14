@@ -31,6 +31,9 @@ const ROUTE_MODULE_MAP: ReadonlyArray<readonly [prefix: string, tag: FeedbackMod
   // Extension-contributed settings tabs are channel plugins (Telegram/Slack/
   // Feishu…) today, so route their reports to the channel module.
   ['/settings/ext', 'channel'],
+  // Shell patch #2 (docs/shell-patches.md): /modes renders the same
+  // extension-served console as /settings/ext/*, so reports route the same way.
+  ['/modes', 'channel'],
   // Remaining settings routes (system, about, unknown future tabs).
   ['/settings', 'system-settings'],
 ];

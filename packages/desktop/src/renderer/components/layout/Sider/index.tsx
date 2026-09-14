@@ -101,7 +101,7 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
     blurActiveElement();
     closePreview();
     setIsBatchMode(false);
-    Promise.resolve(navigate('/settings/ext/ext-modes-console-modes-console')).catch((error) => {
+    Promise.resolve(navigate('/modes')).catch((error) => {
       console.error('Navigation failed:', error);
     });
     if (onSessionClick) {
@@ -232,7 +232,7 @@ const Sider: React.FC<SiderProps> = ({ onSessionClick, collapsed = false }) => {
             {/* modes console nav entry - fixed above scroll */}
             <SiderModesEntry
               isMobile={isMobile}
-              isActive={pathname === '/settings/ext/ext-modes-console-modes-console'}
+              isActive={pathname === '/modes'}
               collapsed={collapsed}
               siderTooltipProps={siderTooltipProps}
               onClick={handleModesClick}
