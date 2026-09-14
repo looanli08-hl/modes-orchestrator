@@ -156,3 +156,7 @@ bun run dev
 - **auto-exec 通过**：路由器真实分类 + cascade 正常终止，auto 模式真实验证完成
 - 真实数据同时确认 model 透传工作（kimi-code/k3、Qwen/Qwen3-Coder-30B-A3B-Instruct 如实落 JSONL）
 - 经验：eval 期望反映"健康配额日"的基线；风暴日的失败本身就是路由数据（什么时候该避开 qwen）
+
+### nightly 04:17 首火结果：17/23（风暴日基线）
+
+6 个失败与 core 跑同因：qwen 超时（simple-create/modify-existing/impossible-task/brainstorm-basic/four-lane）+ cascade-basic 再次走真实升级路径（level 2 胜）。全部 10 个 extended 任务类型场景通过。风暴日基线确立：失败指纹 = qwen timeout；健康日应以全绿为基线。
