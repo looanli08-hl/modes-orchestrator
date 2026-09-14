@@ -27,6 +27,8 @@ import { runTask } from '../src/run/runTask';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const evalsDir = path.resolve(here, '..', 'evals');
 const runsFile = path.join(evalsDir, 'eval-runs.jsonl');
+/** per-scenario event logs are copied here before the throwaway repos evaporate */
+const eventsDir = path.join(evalsDir, 'events');
 
 const args = process.argv.slice(2);
 const all = args.includes('--all');
@@ -40,7 +42,7 @@ if (scenarios.length === 0) {
 const scope = ids.length > 0 ? 'selected ids' : all ? 'all tiers' : 'core tier';
 console.log(`modes-eval: ${scenarios.length} scenario(s) (${scope}), real CLIs (lanes kimi+qwen, reviewer/synthesizer kimi)\n`);
 
-const results = await runEval(scenarios, { runTask, runBrainstorm, runCascade, recordPick: recordUserPick, mergeLane });
+const results = await runEval(scenarios, { runTask, runBrainstorm, runCascade, recordPick: recordUserPick, mergeLane }, { eventsDir });
 
 function formatRow(r: ScenarioResult): string {
   const status = r.pass ? 'PASS' : 'FAIL';
@@ -59,7 +61,7 @@ for (const r of results) {
 const passed = results.filter((r) => r.pass).length;
 console.log(`\n${passed}/${results.length} passed`);
 for (const r of results) {
-  console.log(`  ${r.scenarioId}: workDir=${r.workDir || '(cleaned up)'} events=${r.eventsFile ?? '(none)'}`);
+  console.log(`  ${r.scenarioId}: workDir=${r.workDir || '(cleaned up)'} events=${r.eventsFile ?? '(none)'} snapshot=${r.eventsSnapshot ?? '(none)'}`);
 }
 
 await mkdir(evalsDir, { recursive: true });

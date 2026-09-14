@@ -8,11 +8,12 @@
  */
 
 import { execFile } from 'node:child_process';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { checkExpectations, decidePick, runEval, type EvalDeps, type ScenarioResult } from '../src/eval/runEval';
 import { EVAL_SCENARIOS, selectScenarios, type EvalScenario } from '../src/eval/scenarios';
@@ -565,5 +566,64 @@ describe('EVAL_SCENARIOS definitions', () => {
     }
     expect(EVAL_SCENARIOS.length).toBeGreaterThanOrEqual(21);
     expect(EVAL_SCENARIOS.filter((s) => s.tier === 'extended').length).toBeGreaterThanOrEqual(14);
+  });
+});
+
+describe('runEval event retention', () => {
+  it('copies the scenario event log into eventsDir and records eventsSnapshot', async () => {
+    const eventsDir = await mkdtemp(path.join(os.tmpdir(), 'modes-eval-snapshots-'));
+    tempDirs.push(eventsDir);
+    const results = await runEval([COMPETE], makeDeps(), { eventsDir });
+    trackTempDir(results);
+
+    const snapshot = results[0].eventsSnapshot;
+    expect(snapshot).toBeTruthy();
+    expect(path.dirname(snapshot!)).toBe(eventsDir);
+    expect(path.basename(snapshot!)).toMatch(/^fake-compete-.+-task-fake\.jsonl$/);
+    // the snapshot is a faithful copy of the (about-to-evaporate) temp-repo log
+    expect(await readEvents(snapshot!)).toEqual(await readEvents(results[0].eventsFile!));
+  });
+
+  it('a failed copy only warns — the scenario result still stands', async () => {
+    const blockerDir = await mkdtemp(path.join(os.tmpdir(), 'modes-eval-blocked-'));
+    tempDirs.push(blockerDir);
+    const blocker = path.join(blockerDir, 'blocker');
+    await writeFile(blocker, 'x', 'utf8'); // a file where mkdir needs a directory
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const results = await runEval([COMPETE], makeDeps(), { eventsDir: path.join(blocker, 'sub') });
+      trackTempDir(results);
+      expect(results[0].pass).toBe(true);
+      expect(results[0].eventsSnapshot).toBeNull();
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('without eventsDir nothing is snapshotted', async () => {
+    const results = await runEval([COMPETE], makeDeps());
+    trackTempDir(results);
+    expect(results[0].eventsSnapshot).toBeUndefined();
+  });
+
+  it('records the reviewer quality pick on compete results', async () => {
+    const results = await runEval(
+      [COMPETE],
+      makeDeps({
+        runTask: makeFakeRunTask({
+          outcomes: { A: 'success', B: 'success' },
+          review: { verdict: 'agreed', pick: 'B', rationale: 'r' },
+        }),
+      })
+    );
+    trackTempDir(results);
+    expect(results[0].reviewPick).toBe('B');
+  });
+
+  it('reviewPick is null when the reviewer gave no usable pick', async () => {
+    const results = await runEval([COMPETE], makeDeps());
+    trackTempDir(results);
+    expect(results[0].reviewPick).toBeNull();
   });
 });

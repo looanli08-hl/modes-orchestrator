@@ -8,7 +8,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -42,12 +42,26 @@ export interface EvalDeps {
   mergeLane: (options: MergeLaneOptions) => Promise<void>;
 }
 
+export interface RunEvalOptions {
+  /**
+   * When set, each scenario's event log is copied here (as
+   * `<scenarioId>-<runTs>-<taskId>.jsonl`) before the throwaway repo evaporates —
+   * the detailed event stream is the durable eval data, the summary line only
+   * points at it. Copy failures warn and never fail the scenario.
+   */
+  eventsDir?: string;
+}
+
 export interface ScenarioResult {
   scenarioId: string;
   pass: boolean;
   failures: string[];
   durationMs: number;
   eventsFile: string | null;
+  /** retained copy of eventsFile under RunEvalOptions.eventsDir; null when the copy failed */
+  eventsSnapshot?: string | null;
+  /** the reviewer's quality pick (compete / auto→compete); null when the reviewer gave no usable PICK */
+  reviewPick?: string | null;
   /** temp repo (compete) / scratch dir (brainstorm), kept for post-mortem inspection */
   workDir: string;
   pick?: UserPick;
@@ -246,6 +260,7 @@ async function runCompeteScenario(scenario: EvalScenario, deps: EvalDeps, failur
     eventsFile: result.eventsFile,
     workDir,
     pick,
+    reviewPick: result.review?.pick ?? null,
     laneOutcomes: Object.fromEntries(result.lanes.map((l) => [l.lane, l.outcome])),
     ...stats,
   };
@@ -403,12 +418,33 @@ async function runAutoScenario(scenario: EvalScenario, deps: EvalDeps, failures:
     eventsFile: result.eventsFile,
     workDir,
     resolvedMode: classification.mode,
+    reviewPick: classification.mode === 'compete' ? ((result as RunTaskResult).review?.pick ?? null) : null,
     laneOutcomes: Object.fromEntries(lanes.map((l) => [l.lane, l.outcome])),
     ...stats,
   };
 }
 
-async function runScenario(scenario: EvalScenario, deps: EvalDeps): Promise<ScenarioResult> {
+/**
+ * Retain the scenario's event log before the throwaway repo evaporates: copy it to
+ * `<eventsDir>/<scenarioId>-<runTs>-<taskId>.jsonl`. The copy is best-effort — a
+ * failure warns and leaves eventsSnapshot null; the scenario result never depends on it.
+ */
+async function snapshotEvents(result: ScenarioResult, runTs: string, eventsDir: string): Promise<void> {
+  if (!result.eventsFile) return;
+  try {
+    const events = await readEvents(result.eventsFile);
+    const taskId = events[0]?.task_id ?? 'unknown';
+    await mkdir(eventsDir, { recursive: true });
+    const dest = path.join(eventsDir, `${result.scenarioId}-${runTs}-${taskId}.jsonl`);
+    await copyFile(result.eventsFile, dest);
+    result.eventsSnapshot = dest;
+  } catch (err) {
+    console.warn(`runEval: could not snapshot events for ${result.scenarioId}: ${String(err)}`);
+    result.eventsSnapshot = null;
+  }
+}
+
+async function runScenario(scenario: EvalScenario, deps: EvalDeps, options?: RunEvalOptions, runTs?: string): Promise<ScenarioResult> {
   const started = Date.now();
   const failures: string[] = [];
   try {
@@ -422,6 +458,9 @@ async function runScenario(scenario: EvalScenario, deps: EvalDeps): Promise<Scen
             : await runCascadeScenario(scenario, deps, failures);
     result.durationMs = Date.now() - started;
     result.pass = result.failures.length === 0;
+    if (options?.eventsDir) {
+      await snapshotEvents(result, runTs ?? 'norunts', options.eventsDir);
+    }
     return result;
   } catch (err) {
     // A scenario that throws (engine crash, git failure, …) fails but never stops the suite.
@@ -437,11 +476,13 @@ async function runScenario(scenario: EvalScenario, deps: EvalDeps): Promise<Scen
 }
 
 /** Scenarios run sequentially: real CLIs share the user's accounts and rate limits. */
-export async function runEval(scenarios: EvalScenario[], deps: EvalDeps): Promise<ScenarioResult[]> {
+export async function runEval(scenarios: EvalScenario[], deps: EvalDeps, options?: RunEvalOptions): Promise<ScenarioResult[]> {
+  // One timestamp per run, filename-safe, shared by every scenario snapshot name.
+  const runTs = new Date().toISOString().replace(/[:.]/g, '-');
   const results: ScenarioResult[] = [];
   for (const scenario of scenarios) {
     // oxlint-disable-next-line no-await-in-loop -- sequential by design: real CLIs share rate limits
-    results.push(await runScenario(scenario, deps));
+    results.push(await runScenario(scenario, deps, options, runTs));
   }
   return results;
 }
