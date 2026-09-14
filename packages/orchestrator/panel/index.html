@@ -6,162 +6,422 @@
 <title>modes console</title>
 <style>
   :root {
-    --bg: #ffffff;
-    --fg: #1f2328;
-    --muted: #59636e;
-    --border: #d1d9e0;
-    --surface: #f6f8fa;
-    --accent: #0969da;
-    --ok: #1a7f37;
-    --bad: #d1242f;
-    --warn: #9a6700;
+    color-scheme: light dark;
+    --bg: #f7f3ec;
+    --surface: #fffdf9;
+    --border: #e3dccf;
+    --fg: #221d18;
+    --muted: #7c7466;
+    --accent: #3d7a67;
+    --accent-soft: rgba(61, 122, 103, 0.12);
+    --on-accent: #fffdf9;
+    --danger: #b04a2e;
+    --danger-soft: rgba(176, 74, 46, 0.08);
+    --success: #4a7a3f;
+    --warn: #a8702a;
+    --add-fg: #4a7a3f;
+    --add-bg: rgba(90, 140, 70, 0.1);
+    --del-fg: #b04a2e;
+    --del-bg: rgba(176, 74, 46, 0.08);
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171512;
+      --surface: #201d19;
+      --border: #2e2925;
+      --fg: #f0ebe3;
+      --muted: #a09a90;
+      --accent: #7cc1af;
+      --accent-soft: rgba(124, 193, 175, 0.14);
+      --on-accent: #14201b;
+      --danger: #e07856;
+      --danger-soft: rgba(224, 120, 86, 0.1);
+      --success: #8fb87a;
+      --warn: #d9a05b;
+      --add-fg: #8fb87a;
+      --add-bg: rgba(143, 184, 122, 0.1);
+      --del-fg: #e07856;
+      --del-bg: rgba(224, 120, 86, 0.1);
+    }
+  }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: var(--bg);
     color: var(--fg);
     font-size: 14px;
     line-height: 1.5;
   }
-  header {
-    border-bottom: 1px solid var(--border);
-    padding: 12px 24px;
+  .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); font-size: 13px; }
+
+  /* --- frame: sidebar + stage ------------------------------------------- */
+  #app { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+  aside {
+    border-right: 1px solid var(--border);
+    padding: 20px 12px;
     display: flex;
-    align-items: baseline;
-    gap: 12px;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+    max-height: 100vh;
+    position: sticky;
+    top: 0;
   }
-  header h1 { font-size: 16px; font-weight: 600; margin: 0; }
-  header span { color: var(--muted); font-size: 13px; }
-  main { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 49px); }
-  aside { border-right: 1px solid var(--border); padding: 16px; }
-  section#detail { padding: 24px; max-width: 1100px; }
+  .brand { padding: 0 8px; display: flex; align-items: baseline; gap: 8px; }
+  .brand .wordmark { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+  .brand .tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
 
-  form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
-  .mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-  .mode-toggle button {
-    flex: 1; padding: 6px 0; border: 0; background: var(--bg); color: var(--muted);
-    font: inherit; cursor: pointer;
+  #new-task-btn {
+    margin: 0 8px;
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--fg);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
   }
-  .mode-toggle button.active { background: var(--surface); color: var(--fg); font-weight: 600; }
-  .cli-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .cli-chips .label { color: var(--muted); font-size: 12px; align-self: center; margin-right: 2px; }
-  .cli-chip {
-    padding: 3px 12px; border: 1px solid var(--border); border-radius: 12px;
-    background: var(--bg); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
-  }
-  .cli-chip.on { background: var(--fg); border-color: var(--fg); color: #fff; font-weight: 500; }
-  .cli-chip:disabled { opacity: 0.45; cursor: default; }
-  textarea, input[type="text"] {
-    width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
-    font: inherit; background: var(--bg); color: var(--fg);
-  }
-  textarea { min-height: 72px; resize: vertical; }
-  textarea:focus, input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  button.primary {
-    padding: 6px 14px; border: 1px solid rgba(0,0,0,0.1); border-radius: 6px;
-    background: var(--fg); color: #fff; font: inherit; font-weight: 500; cursor: pointer;
-  }
-  button.primary:disabled { opacity: 0.5; cursor: default; }
+  #new-task-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-  .task-list { display: flex; flex-direction: column; gap: 4px; }
+  .section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    padding: 0 8px;
+  }
+
+  /* --- task history ------------------------------------------------------ */
+  .task-list { display: flex; flex-direction: column; gap: 2px; }
   .task-item {
-    padding: 8px 10px; border-radius: 6px; cursor: pointer; border: 1px solid transparent;
+    display: flex;
+    gap: 10px;
+    padding: 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    border: 1px solid transparent;
   }
   .task-item:hover { background: var(--surface); }
   .task-item.selected { background: var(--surface); border-color: var(--border); }
+  .task-item .ti-main { min-width: 0; flex: 1; }
   .task-item .prompt {
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
   }
   .task-item .meta { display: flex; gap: 8px; align-items: center; margin-top: 2px; }
+  .task-item .ti-mode { font-size: 11px; color: var(--muted); }
+  .task-item .ti-mode .auto-mark { color: var(--accent); }
+
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; margin-top: 6px; }
+  .dot.st-running { background: var(--accent); animation: breathe 1.6s ease-in-out infinite; }
+  .dot.st-done { background: var(--success); }
+  .dot.st-failed { background: var(--danger); }
+  .dot.st-awaiting_pick { background: var(--warn); }
+  @keyframes breathe {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--accent-soft); }
+    50% { opacity: 0.5; box-shadow: 0 0 0 5px var(--accent-soft); }
+  }
+
+  /* --- stage ------------------------------------------------------------- */
+  main { min-width: 0; }
+  section#detail { padding: 32px 40px 64px; max-width: 1080px; }
+
+  /* empty state: the brand moment — mode picker, big ask, team roster */
+  #stage-empty { display: flex; justify-content: center; padding: 10vh 32px 64px; }
+  #stage-empty[hidden], section#detail[hidden] { display: none; }
+  .empty-inner { width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 28px; }
+  .empty-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: 0.16em; color: var(--muted); }
+
+  .mode-toggle {
+    display: inline-flex;
+    align-self: flex-start;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2px;
+    gap: 2px;
+    background: var(--surface);
+  }
+  .mode-toggle button {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .mode-toggle button:hover { color: var(--fg); }
+  .mode-toggle button.active { background: var(--accent-soft); color: var(--accent); }
+
+  form#run-form { display: flex; flex-direction: column; gap: 20px; margin: 0; }
+  textarea#prompt {
+    width: 100%;
+    min-height: 128px;
+    padding: 16px 20px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--fg);
+    font: inherit;
+    font-size: 20px;
+    line-height: 1.4;
+    resize: vertical;
+  }
+  textarea#prompt:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  textarea#prompt::placeholder { color: var(--muted); opacity: 0.75; }
+  input#repo-path {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  input#repo-path:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  input#repo-path::placeholder { color: var(--muted); font-family: inherit; }
+
+  .roster { display: flex; flex-direction: column; gap: 10px; }
+  .cli-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .cli-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .cli-chip:hover { border-color: var(--accent); }
+  .cli-chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--fg); font-weight: 500; }
+  .cli-chip:disabled { opacity: 0.45; cursor: default; }
+  .cli-chip:disabled:hover { border-color: var(--border); }
+  .chip-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .chip-dot.ok { background: var(--success); }
+  .chip-dot.off { background: var(--muted); opacity: 0.5; }
+
+  button.primary {
+    align-self: flex-start;
+    padding: 9px 24px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary:hover { filter: brightness(1.06); }
+  button.primary:disabled { opacity: 0.5; cursor: default; }
+
+  /* --- task view ---------------------------------------------------------- */
+  .task-head { margin-bottom: 4px; }
+  .task-head h2 { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 8px; line-height: 1.35; }
+  .task-head .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
   .badge {
-    display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px;
-    border: 1px solid var(--border); color: var(--muted); background: var(--surface);
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    background: var(--surface);
   }
-  .badge.ok { color: var(--ok); border-color: rgba(26,127,55,0.35); }
-  .badge.bad { color: var(--bad); border-color: rgba(209,36,47,0.35); }
-  .badge.warn { color: var(--warn); border-color: rgba(154,103,0,0.35); }
-  .badge.auto { color: var(--accent); border-color: rgba(9,105,218,0.4); background: transparent; }
+  .badge.ok { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+  .badge.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+  .badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .badge.auto { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: transparent; }
   .badge.mode { color: var(--fg); }
 
-  .banner.classification { border-color: rgba(9,105,218,0.35); }
+  /* the dispatcher speaks: one narrator line, its source always visible */
+  .banner {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    background: var(--surface);
+    padding: 12px 16px;
+    margin: 20px 0;
+  }
+  .banner .banner-label {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .banner .verdict { font-weight: 650; }
+  .banner .source-tag {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 11px;
+    color: var(--muted);
+  }
   .banner.classification .verdict { color: var(--accent); }
 
-  pre.diff .diff-line { display: block; }
-  pre.diff .diff-line.add { color: var(--ok); background: rgba(26,127,55,0.07); }
-  pre.diff .diff-line.del { color: var(--bad); background: rgba(209,36,47,0.07); }
-  pre.diff .diff-line.hunk { color: var(--accent); }
-  .diff-toggle {
-    margin-top: 6px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 6px;
-    background: var(--bg); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
-  }
-  .diff-toggle:hover { background: var(--surface); }
-
-  .banner {
-    border: 1px solid var(--border); border-radius: 6px; background: var(--surface);
-    padding: 12px 16px; margin: 16px 0;
-  }
-  .banner .verdict { font-weight: 600; }
   .error-box {
-    border: 1px solid rgba(209,36,47,0.4); border-radius: 6px; background: #fff8f8;
-    color: var(--bad); padding: 12px 16px; margin: 16px 0; font-size: 13px;
+    border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+    border-radius: 6px;
+    background: var(--danger-soft);
+    color: var(--danger);
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 13px;
   }
-  .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
+
+  .running-note { display: flex; align-items: center; gap: 10px; margin-top: 28px; color: var(--muted); }
+  .running-note .dot { margin-top: 0; }
+
+  /* lanes — compete / brainstorm / single share the card, cascade a chain */
+  .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 20px; }
   .lanes.single { grid-template-columns: 1fr; }
-  .lane-card { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .lane-card { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
   .lane-card header {
-    padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--border);
-    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
   }
   .lane-card header h3 { margin: 0; font-size: 13px; font-weight: 600; }
-  .lane-card .body { padding: 12px; }
+  .lane-card .body { padding: 14px; }
   .lane-card .body p { margin: 0 0 12px; white-space: pre-wrap; }
+  .lane-card .body p:last-child { margin-bottom: 0; }
+
+  .chain { display: flex; align-items: stretch; overflow-x: auto; margin-top: 20px; padding-bottom: 4px; }
+  .chain-step {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    padding: 12px 16px;
+    min-width: 168px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .chain-step .step-title { font-size: 13px; font-weight: 600; }
+  .chain-step .step-latency { font-size: 12px; color: var(--muted); }
+  .chain-arrow { align-self: center; padding: 0 12px; color: var(--muted); flex: none; }
+
+  .round-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 28px 0 0;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+  }
+  .round-head::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  .round-head:first-of-type { margin-top: 8px; }
+
   pre {
-    font-family: var(--mono); font-size: 12px; background: var(--surface);
-    border: 1px solid var(--border); border-radius: 6px; padding: 10px;
-    overflow: auto; max-height: 400px; margin: 0; white-space: pre;
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    overflow: auto;
+    max-height: 400px;
+    margin: 0;
+    white-space: pre;
   }
-  .pick-bar { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
+  pre.diff .diff-line { display: block; }
+  pre.diff .diff-line.add { color: var(--add-fg); background: var(--add-bg); }
+  pre.diff .diff-line.del { color: var(--del-fg); background: var(--del-bg); }
+  pre.diff .diff-line.hunk { color: var(--accent); }
+  .diff-toggle {
+    margin-top: 6px;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .diff-toggle:hover { color: var(--fg); border-color: var(--accent); }
+
+  .pick-bar { display: flex; gap: 8px; align-items: center; margin-top: 20px; flex-wrap: wrap; }
   .pick-bar button {
-    padding: 6px 16px; border: 1px solid var(--border); border-radius: 6px;
-    background: var(--bg); font: inherit; font-weight: 500; cursor: pointer;
+    padding: 7px 18px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--fg);
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
   }
-  .pick-bar button:hover { background: var(--surface); }
-  .muted { color: var(--muted); font-size: 13px; }
-  h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
-  #detail .placeholder { color: var(--muted); margin-top: 40px; text-align: center; }
+  .pick-bar button:hover { border-color: var(--accent); color: var(--accent); }
+  .pick-bar button.pick-main { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .pick-bar button.pick-main:hover { filter: brightness(1.06); color: var(--on-accent); }
+
+  .done-note { margin-top: 20px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>modes console</h1>
-  <span>local orchestration panel</span>
-</header>
-<main>
+<div id="app">
   <aside>
-    <form id="run-form">
-      <div class="mode-toggle">
-        <button type="button" id="mode-auto" class="active">auto</button>
-        <button type="button" id="mode-single">single</button>
-        <button type="button" id="mode-compete">compete</button>
-        <button type="button" id="mode-brainstorm">brainstorm</button>
-        <button type="button" id="mode-cascade">cascade</button>
-        <button type="button" id="mode-roundtable">roundtable</button>
-      </div>
-      <div class="cli-chips" id="cli-chips"></div>
-      <textarea id="prompt" placeholder="Describe the task…" required></textarea>
-      <input type="text" id="repo-path" placeholder="Repo path (must be a git repo); empty = cwd of the console" />
-      <button class="primary" id="run-btn" type="submit">Run</button>
-    </form>
+    <div class="brand"><span class="wordmark">modes</span><span class="tag">console</span></div>
+    <button type="button" id="new-task-btn">+ New task</button>
+    <div class="section-label">History</div>
     <div class="task-list" id="task-list"></div>
   </aside>
-  <section id="detail">
-    <p class="placeholder">Run a task or select one from the list.</p>
-  </section>
-</main>
+  <main>
+    <section id="stage-empty">
+      <div class="empty-inner">
+        <span class="empty-kicker">modes — AI team dispatch</span>
+        <div class="mode-toggle">
+          <button type="button" id="mode-auto" class="active">auto</button>
+          <button type="button" id="mode-single">single</button>
+          <button type="button" id="mode-compete">compete</button>
+          <button type="button" id="mode-brainstorm">brainstorm</button>
+          <button type="button" id="mode-cascade">cascade</button>
+          <button type="button" id="mode-roundtable">roundtable</button>
+        </div>
+        <form id="run-form">
+          <textarea id="prompt" placeholder="Give the team a task…" required></textarea>
+          <input type="text" id="repo-path" placeholder="Repo path (must be a git repo); empty = cwd of the console" />
+          <div class="roster">
+            <span class="section-label" style="padding:0">Team — light the CLIs you want on this</span>
+            <div class="cli-chips" id="cli-chips"></div>
+          </div>
+          <button class="primary" id="run-btn" type="submit">Dispatch</button>
+        </form>
+      </div>
+    </section>
+    <section id="detail" hidden></section>
+  </main>
+</div>
 
 <script>
 "use strict";
@@ -283,16 +543,34 @@ function outcomeBadge(outcome) {
   return `<span class="badge ${outcome === "success" ? "ok" : "bad"}">${esc(outcome)}</span>`;
 }
 
+// --- stage switching --------------------------------------------------------
+// The stage is either the dispatch empty state (brand moment) or the selected
+// task's view. "+ New task" and task selection flip between the two.
+
+function showStage(which) {
+  $("stage-empty").hidden = which !== "empty";
+  $("detail").hidden = which !== "detail";
+}
+
+function showEmpty() {
+  state.selectedId = null;
+  state.lastTask = null;
+  stopFollowing();
+  showStage("empty");
+  refreshTaskList();
+}
+
 // --- CLI chips ------------------------------------------------------------
 
 function renderCliChips() {
   const box = $("cli-chips");
   if (!state.clis.length) { box.innerHTML = ""; return; }
-  box.innerHTML = `<span class="label">clis</span>` + state.clis.map((c) => {
+  box.innerHTML = state.clis.map((c) => {
     const on = state.selectedClis.has(c.name);
     const disabled = c.available ? "" : "disabled";
     const title = c.available ? (on ? "lit — click to dismiss" : "click to hire") : "not installed / unavailable";
-    return `<button type="button" class="cli-chip ${on ? "on" : ""}" data-cli="${esc(c.name)}" ${disabled} title="${esc(title)}">${esc(c.name)}</button>`;
+    return `<button type="button" class="cli-chip ${on ? "on" : ""}" data-cli="${esc(c.name)}" ${disabled} title="${esc(title)}">` +
+      `<span class="chip-dot ${c.available ? "ok" : "off"}"></span>${esc(c.name)}</button>`;
   }).join("");
   for (const el of box.querySelectorAll(".cli-chip:not([disabled])")) {
     el.addEventListener("click", () => {
@@ -326,8 +604,14 @@ async function refreshTaskList() {
   const tasks = await api(apiUrl.tasks());
   $("task-list").innerHTML = tasks.map((t) => `
     <div class="task-item ${t.id === state.selectedId ? "selected" : ""}" data-id="${esc(t.id)}">
-      <div class="prompt">${esc(t.prompt)}</div>
-      <div class="meta">${modeBadge(t)}${statusBadge(t.status)}<span class="muted">${esc(relativeTime(t.createdAt))}</span></div>
+      <span class="dot st-${esc(t.status)}"></span>
+      <div class="ti-main">
+        <div class="prompt">${esc(t.prompt)}</div>
+        <div class="meta">
+          <span class="ti-mode">${esc(t.mode)}${t.classification ? ` <span class="auto-mark">· auto</span>` : ""}</span>
+          <span class="muted" style="font-size:11px">${esc(relativeTime(t.createdAt))}</span>
+        </div>
+      </div>
     </div>`).join("");
   for (const el of document.querySelectorAll(".task-item")) {
     el.addEventListener("click", () => selectTask(el.dataset.id));
@@ -391,6 +675,7 @@ async function selectTask(id) {
 
 function renderDetail(task) {
   state.lastTask = task;
+  showStage("detail");
   const detail = $("detail");
   const classificationBanner = task.classification
     ? (() => {
@@ -399,19 +684,26 @@ function renderDetail(task) {
           : task.classification.dispatchSource === "rules-fallback" ? "rules fallback"
           : task.classification.confidence ? `${task.classification.confidence} confidence` : "";
         return `<div class="banner classification">
-          <div><span class="verdict">auto → ${esc(task.classification.mode)}</span>${source ? ` · ${esc(source)}` : ""}</div>
+          <span class="banner-label">dispatcher</span>
+          <div><span class="verdict">auto → ${esc(task.classification.mode)}</span>${source ? `<span class="source-tag">${esc(source)}</span>` : ""}</div>
           <div class="muted">${esc(task.classification.reason)}</div>
         </div>`;
       })()
     : "";
   let html = `
-    <h2>${esc(task.prompt)}</h2>
-    <div class="muted">${modeBadge(task)} ${esc(task.repoPath)} · ${statusBadge(task.status)} · ${esc(relativeTime(task.createdAt))}</div>
+    <div class="task-head">
+      <h2>${esc(task.prompt)}</h2>
+      <div class="meta">${modeBadge(task)} ${statusBadge(task.status)}
+        <span class="muted mono">${esc(task.repoPath)}</span>
+        <span class="muted">${esc(relativeTime(task.createdAt))}</span>
+        <span class="muted mono">${esc(task.id.slice(0, 8))}</span>
+      </div>
+    </div>
     ${classificationBanner}
     ${task.error ? `<div class="error-box">${esc(task.error)}</div>` : ""}`;
 
   if (task.status === "running") {
-    html += `<p class="muted" style="margin-top:24px">Running — lanes are working…</p>`;
+    html += `<div class="running-note"><span class="dot st-running"></span>Running — the team is on it…</div>`;
   } else if (task.mode === "compete") {
     html += renderCompete(task);
   } else if (task.mode === "cascade") {
@@ -452,6 +744,7 @@ function renderCompete(task) {
     const rec = task.review.pick === "tie" ? "TIE — comparable quality"
       : task.review.pick ? `reviewer recommends lane ${task.review.pick}` : "no recommendation";
     html += `<div class="banner">
+      <span class="banner-label">cross-review</span>
       <div><span class="verdict">verdict: ${esc(task.review.verdict)}</span> · ${esc(rec)}</div>
       <div class="muted">${esc(task.review.rationale)}</div>
     </div>`;
@@ -466,7 +759,7 @@ function renderCompete(task) {
     </div>`).join("") + `</div>`;
   if (task.status === "awaiting_pick") {
     const laneButtons = (task.lanes || [])
-      .map((l) => `<button id="pick-${esc(l.lane)}">Pick ${esc(l.lane)}</button>`)
+      .map((l) => `<button class="pick-main" id="pick-${esc(l.lane)}">Pick ${esc(l.lane)}</button>`)
       .join("\n      ");
     html += `<div class="pick-bar">
       ${laneButtons}
@@ -474,16 +767,18 @@ function renderCompete(task) {
       <span class="muted">merges the picked lane into the current branch</span>
     </div>`;
   } else if (task.status === "done") {
-    html += `<p class="muted" style="margin-top:16px">Pick recorded — task done.</p>`;
+    html += `<p class="muted done-note">Pick recorded — task done.</p>`;
   }
   return html;
 }
 
 function renderCascade(task) {
-  let html = `<div class="lanes single">` + (task.attempts || []).map((a) => `
-    <div class="lane-card">
-      <header><h3>Level ${esc(a.level)} · ${esc(a.cli)}</h3>${outcomeBadge(a.outcome)}</header>
-      <div class="body"><p class="muted">${(a.latency / 1000).toFixed(1)}s</p></div>
+  let html = `<div class="chain">` + (task.attempts || []).map((a, i) => `
+    ${i > 0 ? `<span class="chain-arrow">→</span>` : ""}
+    <div class="chain-step">
+      <span class="step-title">Level ${esc(a.level)} · ${esc(a.cli)}</span>
+      ${outcomeBadge(a.outcome)}
+      <span class="step-latency">${(a.latency / 1000).toFixed(1)}s</span>
     </div>`).join("") + `</div>`;
   if (task.winner) {
     html += `<div class="lanes single"><div class="lane-card">
@@ -499,12 +794,12 @@ function renderCascade(task) {
   }
   if (task.status === "awaiting_pick") {
     html += `<div class="pick-bar">
-      <button id="pick-cascade-${esc(task.winner.level)}">Merge cascade-${esc(task.winner.level)}</button>
+      <button class="pick-main" id="pick-cascade-${esc(task.winner.level)}">Merge cascade-${esc(task.winner.level)}</button>
       <button id="pick-neither">Neither</button>
       <span class="muted">merges the winning level into the current branch</span>
     </div>`;
   } else if (task.status === "done" && task.winner) {
-    html += `<p class="muted" style="margin-top:16px">Pick recorded — task done.</p>`;
+    html += `<p class="muted done-note">Pick recorded — task done.</p>`;
   }
   return html;
 }
@@ -523,12 +818,12 @@ function renderSingle(task) {
     </div></div>`;
   if (task.status === "awaiting_pick") {
     html += `<div class="pick-bar">
-      <button id="pick-single">Merge</button>
+      <button class="pick-main" id="pick-single">Merge</button>
       <button id="pick-neither">Neither</button>
       <span class="muted">merges the lane's diff into the current branch</span>
     </div>`;
   } else if (task.status === "done" && l.outcome === "success" && l.diff) {
-    html += `<p class="muted" style="margin-top:16px">Pick recorded — task done.</p>`;
+    html += `<p class="muted done-note">Pick recorded — task done.</p>`;
   } else if (task.status === "done" && l.outcome !== "success") {
     html += `<div class="banner"><span class="verdict">lane failed — nothing to merge</span>
       <div class="muted">single is one shot: there is no fallback level, the failure is reported as-is.</div></div>`;
@@ -543,10 +838,10 @@ function renderBrainstorm(task) {
       <div class="body"><p>${esc(l.answer || "(no answer)")}</p></div>
     </div>`).join("") + `</div>`;
   if (task.synthesis) {
-    html += `<div class="banner"><div class="verdict">synthesis</div>
+    html += `<div class="banner"><span class="banner-label">synthesis</span>
       <div class="muted" style="white-space:pre-wrap">${esc(task.synthesis)}</div></div>`;
   } else if (task.status === "done") {
-    html += `<p class="muted" style="margin-top:16px">Synthesis skipped — all lanes failed.</p>`;
+    html += `<p class="muted done-note">Synthesis skipped — all lanes failed.</p>`;
   }
   return html;
 }
@@ -557,7 +852,7 @@ function renderRoundtable(task) {
   const rounds = task.rounds || [];
   let html = "";
   rounds.forEach((r, i) => {
-    html += `<h2 style="margin-top:${i === 0 ? "8px" : "24px"}">Round ${esc(r.round)}</h2>`;
+    html += `<div class="round-head">Round ${esc(r.round)}</div>`;
     html += `<div class="lanes">` + (r.lanes || []).map((l) => `
       <div class="lane-card">
         <header><h3>${esc(l.cli)}</h3>${outcomeBadge(l.outcome)}</header>
@@ -572,10 +867,10 @@ function renderRoundtable(task) {
     }
   });
   if (task.synthesis) {
-    html += `<div class="banner"><div class="verdict">synthesis</div>
+    html += `<div class="banner"><span class="banner-label">synthesis</span>
       <div class="muted" style="white-space:pre-wrap">${esc(task.synthesis)}</div></div>`;
   } else if (task.status === "done") {
-    html += `<p class="muted" style="margin-top:16px">Synthesis skipped — all lanes failed.</p>`;
+    html += `<p class="muted done-note">Synthesis skipped — all lanes failed.</p>`;
   }
   return html;
 }
@@ -611,6 +906,8 @@ function setMode(mode) {
 for (const m of ["auto", "single", "compete", "brainstorm", "cascade", "roundtable"]) {
   $(`mode-${m}`).addEventListener("click", () => setMode(m));
 }
+
+$("new-task-btn").addEventListener("click", showEmpty);
 
 $("run-form").addEventListener("submit", async (e) => {
   e.preventDefault();
