@@ -212,3 +212,11 @@ bun run dev
 - [x] 空状态重做：居中问候"今天让团队做点什么？"、团队 pills（默认全不选=统筹自动搭配，原预点亮逻辑删除）、模式降级为小字文字链（统筹(自动)/单人/竞赛/脑暴/接力/圆桌）、16px 圆角输入卡 + 圆形发送钮、"在项目中工作"chip 收起 repo path、三条中文建议指令
 - [x] 任务视图维持 Orca 密度不动；空状态全中文，任务视图维持英文（改动面克制）
 - Playwright 双主题截图自查通过；352 测试全绿
+
+## Day 3 续 — Orca 深度调研 + 可移植性评估 + 工作区/实时流后端
+
+- [x] **Orca 源码级调研**（/tmp/orca-deep-dive.md）：CLI = 瘦 RPC 客户端（~150 动词，驱动运行中 runtime）；**"一键扇出"在 Orca 里不存在**（官方文档教人手动粘三遍 prompt）、跨 worktree diff 对比为零——wedge 源码级确认；债区在远程/relay/daemon（不抄）
+- [x] **可移植性评估**：可 vendor 的是契约层小宝石（Annotate 批注契约 ~120 行、agent-context ~160 行）；worktree git 层抄语义+摘叶子；终端 daemon 72.5k LOC 坚决不搬（Orca 自己头号 bug 区）；qwen 适配 Orca 只有 4 行=空白机会
+- [x] **lane 实时流后端**：LaneStreamHub（每 lane 一流文件，2MB 封顶留尾，SSE 合批 50ms/4KB），`lane_output` 命名 SSE 事件 + `GET /api/tasks/:id/lanes/:lane/output?offset=` 补读端点；五种模式全部走统一 spawn tap；JSONL 事件流不动（spec §5 无漂移）
+- [x] **任务工作区化第一步**：repos 注册端点（校验 git、注销不动磁盘）+ `DELETE /api/tasks/:id/worktrees` 一键清理（面板任务条目 hover 出"清理"按钮）
+- 测试 352 → 378 全绿；真实冒烟：SSE chunk 逐段到达、worktree 清理精确
