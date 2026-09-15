@@ -10,7 +10,9 @@
  * via packages/orchestrator/.modes-console-token), all /api/* routes require a
  * matching x-modes-token header; CORS is fully open so the AionUi-embedded panel
  * (served from aioncore's origin) can call the API cross-origin — the token, not
- * CORS, is the access control. GET /api/health is public for liveness probes.
+ * CORS, is the access control. GET /api/health and GET /api/agent-context are
+ * public: the former for liveness probes, the latter because it is a public
+ * instruction sheet (the same JSON modes-run.ts --agent-context prints).
  */
 
 import { readFile, stat } from 'node:fs/promises';
@@ -19,6 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { UserPick } from '../gate/userGate';
+import { buildAgentContext } from '../agentContext/agentContext';
 import type { CascadeLevel } from '../patterns/cascade';
 import { formatDiffComments, type AnnotateComment } from '../review/annotate';
 import { parseKimiSessionId } from '../review/followup';
@@ -90,9 +93,10 @@ export interface SingleEngineResult {
 export interface ConsoleDeps {
   /**
    * Bearer token gating /api/* (header: x-modes-token). When set, every API
-   * route requires it; GET /api/health stays public for liveness probes and
-   * GET / stays public (it serves the panel, with the token injected for
-   * same-origin/loopback readers only). Unset = legacy open behavior.
+   * route requires it; GET /api/health and GET /api/agent-context stay public
+   * (liveness probe / public instruction sheet) and GET / stays public (it
+   * serves the panel, with the token injected for same-origin/loopback readers
+   * only). Unset = legacy open behavior.
    */
   token?: string;
   runCompete(options: {
@@ -822,6 +826,9 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     try {
       // public liveness probe (used by the extension's activate.js)
       if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true });
+      // public agent discovery: same JSON as modes-run.ts --agent-context; the
+      // content is a public instruction sheet, so no token is required
+      if (req.method === 'GET' && url.pathname === '/api/agent-context') return sendJson(res, 200, buildAgentContext());
 
       if (deps.token && url.pathname.startsWith('/api/')) {
         // EventSource cannot set headers, so the SSE route also honors ?token=

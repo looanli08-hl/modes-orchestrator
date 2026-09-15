@@ -18,6 +18,7 @@
 import path from 'node:path';
 import readline from 'node:readline';
 
+import { buildAgentContext, formatCliHelp } from '../src/agentContext/agentContext';
 import { mergeLane } from '../src/gate/mergeLane';
 import { recordUserPick } from '../src/gate/recordUserPick';
 import type { UserPick } from '../src/gate/userGate';
@@ -169,6 +170,17 @@ async function presentSingleResult(repoPath: string, result: SingleResult): Prom
 }
 
 const args = process.argv.slice(2);
+
+// meta flags exit before prompt parsing — `--help` must never be read as a prompt
+if (args.includes('--agent-context')) {
+  console.log(JSON.stringify(buildAgentContext(), null, 2));
+  process.exit(0);
+}
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(formatCliHelp());
+  process.exit(0);
+}
+
 const modeFlagIndex = args.indexOf('--mode');
 const mode = modeFlagIndex >= 0 ? args[modeFlagIndex + 1] : 'compete';
 if (modeFlagIndex >= 0) args.splice(modeFlagIndex, 2);
