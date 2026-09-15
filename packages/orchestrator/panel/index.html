@@ -2178,6 +2178,15 @@ for (const el of document.querySelectorAll(".suggestion")) {
   });
 }
 
+// Enter dispatches, Shift+Enter inserts a newline — same convention as the
+// workspace composer, so the box never feels like it "won't send".
+$("prompt").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    $("run-form").requestSubmit();
+  }
+});
+
 $("run-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const prompt = $("prompt").value.trim();
