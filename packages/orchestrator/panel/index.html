@@ -464,6 +464,39 @@
   .round-head::after { content: ""; flex: 1; height: 1px; background: var(--border); }
   .round-head:first-of-type { margin-top: 4px; }
 
+  /* --- live lane output: the stream inside/below a terminal panel --------- */
+  .live-wrap { position: relative; border-bottom: 1px solid var(--border); }
+  .live-wrap[hidden] { display: none; }
+  .term.live-panel { margin-top: 16px; }
+  .term.live-panel[hidden] { display: none; }
+  .term.live-panel .live-wrap { border-bottom: 0; }
+  .live-out {
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--fg);
+  }
+  .back-bottom {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(1, 4, 9, 0.2);
+  }
+  .back-bottom:hover { color: var(--fg); border-color: var(--accent); }
+
   /* --- diff: GitHub-style file blocks with gutters and +/- counts --------- */
   .diff {
     border: 1px solid var(--border);
@@ -607,6 +640,11 @@ const apiUrl = {
   pick: (id) =>
     VIA_EXTENSION_PROXY ? `${API_BASE}/pick` : `${API_BASE}/tasks/${encodeURIComponent(id)}/pick`,
   worktrees: (id) => `${API_BASE}/tasks/${encodeURIComponent(id)}/worktrees`,
+  // catch-up read of a lane's raw output stream (byte-offset continuation);
+  // not on the extension proxy — pulls there fail quietly and only SSE-less
+  // polling remains, same as before streams existed
+  laneOutput: (id, lane, offset) =>
+    `${API_BASE}/tasks/${encodeURIComponent(id)}/lanes/${encodeURIComponent(lane)}/output?offset=${offset}`,
   // EventSource cannot send headers, so the shared token rides as ?token= (the
   // server honors it on this route only). No events route exists on the
   // extension proxy — SSE is skipped there and polling is used.
@@ -633,6 +671,10 @@ const state = {
   selectedClis: new Set(),
   // diff fold state survives re-renders: key = "<taskId>:<lane|winner>"
   expandedDiffs: new Set(),
+  // live lane output for the selected task: { taskId, lanes: Map<lane, entry> }
+  // entry = { text, offset, follow, scrollTop, pulling, dirty }; null when no
+  // task is selected. text survives re-renders, DOM nodes are repainted from it.
+  live: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -748,6 +790,168 @@ function outcomeBadge(outcome) {
   return `<span class="badge ${outcome === "success" ? "ok" : "bad"}">${esc(outcome)}</span>`;
 }
 
+// --- live lane output -------------------------------------------------------
+// The stream file is the single source of truth: SSE lane_output events are
+// appended directly (ordered, batch-flushed before close), and the catch-up
+// route covers every gap — first contact mid-stream, a reconnect, a reopened
+// running task, or replaying a finished one. CLI output is untrusted text:
+// it only ever enters the DOM via textContent, never innerHTML.
+
+const LIVE_MAX_LINES = 2000; // per-lane DOM cap — keep the tail
+const LIVE_TRIM_AT = 2400;
+const LIVE_TRIM_CHARS = 200000; // only count lines once the text is big
+const utf8 = new TextEncoder();
+const byteLen = (s) => utf8.encode(s).length;
+
+// lane output sits inside an existing terminal panel (under its head)…
+function liveWrap(lane) {
+  return `<div class="live-wrap" data-live-wrap="${esc(lane)}" hidden>` +
+    `<div class="live-out" data-lane="${esc(lane)}"></div>` +
+    `<button type="button" class="back-bottom" data-lane="${esc(lane)}" hidden>回到底部</button></div>`;
+}
+
+// …or, for lanes with no panel of their own (review / synthesis / consensus /
+// cascade attempts), as a standalone terminal panel
+function livePanel(lane, running = false) {
+  const dot = running ? `<span class="dot st-running"></span>` : "";
+  return `<div class="term live-panel" data-live-panel="${esc(lane)}"${running ? "" : " hidden"}>` +
+    `<div class="term-head"><span class="term-name">${esc(lane)}</span>${dot}</div>${liveWrap(lane)}</div>`;
+}
+
+// a lane label can map to several panels (roundtable repeats cli panels per
+// round — both rounds stream under the same label), so paint them all
+function laneDetailEls(selector, lane) {
+  return [...$("detail").querySelectorAll(`${selector}[data-lane="${CSS.escape(lane)}"]`)];
+}
+const laneOutEls = (lane) => laneDetailEls(".live-out", lane);
+const laneWrapEls = (lane) => [...$("detail").querySelectorAll(`[data-live-wrap="${CSS.escape(lane)}"]`)];
+const lanePanelEls = (lane) => [...$("detail").querySelectorAll(`[data-live-panel="${CSS.escape(lane)}"]`)];
+
+function liveEntry(lane) {
+  const live = state.live;
+  if (!live) return null;
+  let e = live.lanes.get(lane);
+  if (!e) {
+    e = { text: "", offset: 0, follow: true, scrollTop: 0, pulling: false, dirty: false };
+    live.lanes.set(lane, e);
+  }
+  return e;
+}
+
+function revealLane(lane) {
+  for (const el of laneWrapEls(lane)) el.hidden = false;
+  for (const el of lanePanelEls(lane)) el.hidden = false;
+}
+
+function paintLane(lane) {
+  const e = state.live?.lanes.get(lane);
+  if (!e) return;
+  const outs = laneOutEls(lane);
+  if (!outs.length) return;
+  const btns = laneDetailEls(".back-bottom", lane);
+  if (e.text) revealLane(lane);
+  for (const out of outs) {
+    out.textContent = e.text;
+    if (e.follow) out.scrollTop = out.scrollHeight;
+    else out.scrollTop = e.scrollTop;
+  }
+  for (const btn of btns) btn.hidden = e.follow;
+}
+
+function trimLiveText(e) {
+  if (e.text.length < LIVE_TRIM_CHARS) return;
+  const lines = e.text.split("\n");
+  if (lines.length > LIVE_TRIM_AT) e.text = lines.slice(-LIVE_MAX_LINES).join("\n");
+}
+
+// a lane first announces itself via its first stream chunk, mid-render cycle —
+// rebuild the running view so its panel appears now, not at the next status push
+function ensureLaneVisible() {
+  if (state.lastTask?.status === "running") renderDetail(state.lastTask);
+}
+
+function appendLaneText(lane, chunk) {
+  const e = liveEntry(lane);
+  if (!e) return;
+  const before = e.text.length;
+  e.text += chunk;
+  trimLiveText(e);
+  const outs = laneOutEls(lane);
+  if (!outs.length) { ensureLaneVisible(); return; }
+  revealLane(lane);
+  for (const out of outs) {
+    out.textContent += chunk; // untrusted CLI output: textContent only, never innerHTML
+    if (e.text.length !== before + chunk.length) out.textContent = e.text; // a trim landed
+    if (e.follow) out.scrollTop = out.scrollHeight;
+  }
+}
+
+// offset-continuation read; serialized per lane, re-armed when a read was
+// requested while one was in flight. Failures (no stream yet, older server,
+// extension proxy) stay silent — the lane simply has no output area.
+async function pullLane(id, lane) {
+  const live = state.live;
+  if (!live || live.taskId !== id) return;
+  const e = liveEntry(lane);
+  if (!e) return;
+  if (e.pulling) { e.dirty = true; return; }
+  e.pulling = true;
+  try {
+    const r = await api(apiUrl.laneOutput(id, lane, e.offset));
+    if (state.live !== live) return;
+    if (e.offset === 0 || r.truncated) {
+      // authoritative replace: first catch-up, or the capped file rewrote to its tail
+      e.text = r.content;
+      trimLiveText(e);
+      paintLane(lane);
+      if (!laneOutEls(lane).length) ensureLaneVisible();
+    } else if (r.content) {
+      appendLaneText(lane, r.content);
+    }
+    e.offset = r.offset;
+  } catch {
+    /* no stream (yet) — the lane stays quiet */
+  } finally {
+    e.pulling = false;
+    if (e.dirty) {
+      e.dirty = false;
+      if (state.live === live) pullLane(id, lane);
+    }
+  }
+}
+
+function resyncLanes(id) {
+  const live = state.live;
+  if (!live || live.taskId !== id) return;
+  for (const lane of live.lanes.keys()) pullLane(id, lane);
+}
+
+// lane labels derivable from a finished task's JSON — for replay pulls
+function streamLanesFor(task) {
+  const lanes = [];
+  if (task.mode === "compete") {
+    for (const l of task.lanes || []) lanes.push(l.lane);
+    if (task.review) lanes.push("review");
+  } else if (task.mode === "single") {
+    lanes.push("single");
+  } else if (task.mode === "cascade") {
+    for (const a of task.attempts || []) lanes.push(`cascade-${a.level}`);
+  } else if (task.mode === "brainstorm") {
+    for (const l of task.lanes || []) lanes.push(l.lane);
+    if (task.synthesis) lanes.push("synthesis");
+  } else if (task.mode === "roundtable") {
+    const clis = new Set();
+    for (const r of task.rounds || []) for (const l of r.lanes || []) clis.add(l.cli);
+    lanes.push(...clis);
+    const rounds = task.rounds || [];
+    for (let i = 1; i < rounds.length; i++) lanes.push(`consensus-r${i}`);
+    if (task.consensus && rounds.length) lanes.push(`consensus-r${rounds.length}`);
+    if (task.synthesis) lanes.push("synthesis");
+  }
+  return lanes;
+}
+
+
 // --- stage switching --------------------------------------------------------
 // The stage is either the dispatch empty state or the selected task's view.
 // "+ New task" and task selection flip between the two.
@@ -760,6 +964,7 @@ function showStage(which) {
 function showEmpty() {
   state.selectedId = null;
   state.lastTask = null;
+  state.live = null;
   stopFollowing();
   showStage("empty");
   refreshTaskList();
@@ -896,13 +1101,37 @@ function followTask(id) {
     if (task.id !== state.selectedId) return;
     renderDetail(task);
     refreshTaskList();
-    // close before the server's own close lands, so EventSource never retries
-    if (TERMINAL_STATUSES.has(task.status)) stopEventStream();
+    // close before the server's own close lands, so EventSource never retries;
+    // then pull every lane the finished JSON names — lanes whose whole stream
+    // pre-dated our subscription were never announced over SSE at all
+    if (TERMINAL_STATUSES.has(task.status)) {
+      stopEventStream();
+      for (const lane of streamLanesFor(task)) pullLane(id, lane);
+      resyncLanes(id);
+    }
   };
+  es.addEventListener("lane_output", (e) => {
+    const { lane, chunk } = JSON.parse(e.data);
+    const live = state.live;
+    if (!live || live.taskId !== id) return;
+    const entry = live.lanes.get(lane);
+    // first contact (e.g. a reopened running task): catch up from offset 0 so
+    // the lane shows its whole story, not a tail starting mid-sentence
+    if (!entry) { pullLane(id, lane); return; }
+    if (entry.pulling) return; // the in-flight read already covers this chunk
+    appendLaneText(lane, chunk);
+    entry.offset += byteLen(chunk);
+  });
   es.onerror = () => {
     if (state.eventSource !== es) return; // we closed it ourselves
-    stopEventStream();
-    startPolling();
+    // CLOSED = the stream is gone for good (older server, proxy) → polling.
+    // CONNECTING = EventSource is auto-reconnecting; either way the catch-up
+    // reads cover whatever the gap dropped.
+    if (es.readyState === EventSource.CLOSED) {
+      stopEventStream();
+      startPolling();
+    }
+    resyncLanes(id);
   };
 }
 
@@ -913,16 +1142,29 @@ function startPolling() {
     const task = await api(apiUrl.task(state.selectedId));
     renderDetail(task);
     refreshTaskList();
-    if (task.status !== "running") stopPolling();
+    // lanes already discovered keep streaming under polling; new lanes mid-run
+    // are only announced over SSE, which this path has no access to
+    if (!VIA_EXTENSION_PROXY) resyncLanes(state.selectedId);
+    if (task.status !== "running") {
+      for (const lane of streamLanesFor(task)) pullLane(task.id, lane);
+      stopPolling();
+    }
   }, 2000);
 }
 
 async function selectTask(id) {
   state.selectedId = id;
+  state.live = { taskId: id, lanes: new Map() };
   const task = await api(apiUrl.task(id));
   renderDetail(task);
   refreshTaskList();
-  if (task.status === "running") followTask(id); else stopFollowing();
+  if (task.status === "running") {
+    followTask(id); // lanes are discovered as their first chunks arrive
+  } else {
+    stopFollowing();
+    // replay: finished tasks keep their stream files — pull every lane's once
+    for (const lane of streamLanesFor(task)) pullLane(id, lane);
+  }
 }
 
 function renderDetail(task) {
@@ -958,7 +1200,13 @@ function renderDetail(task) {
 
   let body = "";
   if (task.status === "running") {
-    body = `<div class="running-note"><span class="dot st-running"></span>running — the team is on it…</div>`;
+    // lanes announce themselves via their first stream chunk; panels appear in
+    // arrival order and repaint from state.live on every re-render
+    const liveLanes = [...(state.live?.lanes.keys() ?? [])]
+      .map((lane) => livePanel(lane, true))
+      .join("");
+    body = `<div class="running-note"><span class="dot st-running"></span>running — the team is on it…</div>` +
+      `<div class="lanes single" id="live-lanes">${liveLanes}</div>`;
   } else if (task.mode === "compete") {
     body = renderCompete(task);
   } else if (task.mode === "cascade") {
@@ -971,6 +1219,19 @@ function renderDetail(task) {
     body = renderBrainstorm(task);
   }
   detail.innerHTML = html + body + `</div>`;
+
+  // repaint live output from state (DOM nodes were just rebuilt)
+  for (const lane of state.live?.lanes.keys() ?? []) paintLane(lane);
+
+  for (const el of detail.querySelectorAll(".back-bottom")) {
+    el.addEventListener("click", () => {
+      const entry = state.live?.lanes.get(el.dataset.lane);
+      if (!entry) return;
+      entry.follow = true;
+      for (const out of laneOutEls(el.dataset.lane)) out.scrollTop = out.scrollHeight;
+      for (const btn of laneDetailEls(".back-bottom", el.dataset.lane)) btn.hidden = true;
+    });
+  }
 
   if (task.status === "awaiting_pick") {
     const picks = task.mode === "cascade"
@@ -1002,11 +1263,12 @@ function renderCompete(task) {
       <span class="banner-label">cross-review</span>
       <div><span class="verdict">verdict: ${esc(task.review.verdict)}</span> · ${esc(rec)}</div>
       <div class="muted">${esc(task.review.rationale)}</div>
-    </div>`;
+    </div>` + livePanel("review");
   }
   html += `<div class="lanes">` + (task.lanes || []).map((l) => `
     <div class="term">
       <div class="term-head"><span class="term-name">lane ${esc(String(l.lane).toLowerCase())}</span>${outcomeBadge(l.outcome)}</div>
+      ${liveWrap(l.lane)}
       <div class="term-body">${esc(l.summary || "(no summary)")}</div>
       ${l.diff ? renderDiff(l.diff, `${task.id}:lane-${l.lane}`) : `<div class="term-body muted-body">(no changes)</div>`}
     </div>`).join("") + `</div>`;
@@ -1032,6 +1294,8 @@ function renderCascade(task) {
       <div class="step-head">L${esc(a.level)} · ${esc(a.cli)}</div>
       <div class="step-body">${outcomeBadge(a.outcome)}<span class="step-latency">${(a.latency / 1000).toFixed(1)}s</span></div>
     </div>`).join("") + `</div>`;
+  // every attempt level streamed under its own label — replay panels below the chain
+  html += (task.attempts || []).map((a) => livePanel(`cascade-${a.level}`)).join("");
   if (task.winner) {
     html += `<div class="lanes single"><div class="term">
       <div class="term-head"><span class="term-name">winner — L${esc(task.winner.level)} (${esc(task.winner.cli)})</span></div>
@@ -1061,6 +1325,7 @@ function renderSingle(task) {
   let html = `<div class="lanes single">
     <div class="term">
       <div class="term-head"><span class="term-name">${esc(l.cli)}</span>${outcomeBadge(l.outcome)}</div>
+      ${liveWrap("single")}
       <div class="term-body">${esc(l.summary || "(no summary)")}</div>
       ${l.diff ? renderDiff(l.diff, `${task.id}:single`) : `<div class="term-body muted-body">(no changes)</div>`}
     </div></div>`;
@@ -1083,11 +1348,12 @@ function renderBrainstorm(task) {
   let html = `<div class="lanes single">` + (task.lanes || []).map((l) => `
     <div class="term">
       <div class="term-head"><span class="term-name">lane ${esc(String(l.lane).toLowerCase())}</span>${outcomeBadge(l.outcome)}</div>
+      ${liveWrap(l.lane)}
       <div class="term-body">${esc(l.answer || "(no answer)")}</div>
     </div>`).join("") + `</div>`;
   if (task.synthesis) {
     html += `<div class="banner"><span class="banner-label">synthesis</span>
-      <div class="muted" style="white-space:pre-wrap">${esc(task.synthesis)}</div></div>`;
+      <div class="muted" style="white-space:pre-wrap">${esc(task.synthesis)}</div></div>` + livePanel("synthesis");
   } else if (task.status === "done") {
     html += `<p class="muted done-note">synthesis skipped — all lanes failed.</p>`;
   }
@@ -1104,19 +1370,22 @@ function renderRoundtable(task) {
     html += `<div class="lanes">` + (r.lanes || []).map((l) => `
       <div class="term">
         <div class="term-head"><span class="term-name">${esc(l.cli)}</span>${outcomeBadge(l.outcome)}</div>
+        ${liveWrap(l.cli)}
         <div class="term-body">${esc(l.answer || "(no answer)")}</div>
       </div>`).join("") + `</div>`;
     if (task.consensus && i === rounds.length - 1) {
       html += `<div class="banner"><span class="verdict">consensus reached</span>
-        <div class="muted">the reviewer judged the positions substantively identical — the debate stopped early.</div></div>`;
+        <div class="muted">the reviewer judged the positions substantively identical — the debate stopped early.</div></div>` +
+        livePanel(`consensus-r${r.round}`);
     } else if (i < rounds.length - 1) {
       html += `<div class="banner"><span class="verdict">no consensus</span>
-        <div class="muted">real differences remained — the table continued into round ${esc(rounds[i + 1].round)}.</div></div>`;
+        <div class="muted">real differences remained — the table continued into round ${esc(rounds[i + 1].round)}.</div></div>` +
+        livePanel(`consensus-r${r.round}`);
     }
   });
   if (task.synthesis) {
     html += `<div class="banner"><span class="banner-label">synthesis</span>
-      <div class="muted" style="white-space:pre-wrap">${esc(task.synthesis)}</div></div>`;
+      <div class="muted" style="white-space:pre-wrap">${esc(task.synthesis)}</div></div>` + livePanel("synthesis");
   } else if (task.status === "done") {
     html += `<p class="muted done-note">synthesis skipped — all lanes failed.</p>`;
   }
@@ -1204,6 +1473,18 @@ $("run-form").addEventListener("submit", async (e) => {
     $("run-btn").disabled = false;
   }
 });
+
+// live output scroll: capture-phase so it survives innerHTML rebuilds of
+// #detail; scrolling up pauses auto-follow and offers a way back to the tail
+$("detail").addEventListener("scroll", (e) => {
+  const out = e.target;
+  if (!(out instanceof Element) || !out.classList.contains("live-out")) return;
+  const entry = state.live?.lanes.get(out.dataset.lane);
+  if (!entry) return;
+  entry.scrollTop = out.scrollTop;
+  entry.follow = out.scrollTop + out.clientHeight >= out.scrollHeight - 24;
+  for (const btn of laneDetailEls(".back-bottom", out.dataset.lane)) btn.hidden = entry.follow;
+}, true);
 
 setMode("auto");
 loadClis();
