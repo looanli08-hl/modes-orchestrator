@@ -220,3 +220,12 @@ bun run dev
 - [x] **lane 实时流后端**：LaneStreamHub（每 lane 一流文件，2MB 封顶留尾，SSE 合批 50ms/4KB），`lane_output` 命名 SSE 事件 + `GET /api/tasks/:id/lanes/:lane/output?offset=` 补读端点；五种模式全部走统一 spawn tap；JSONL 事件流不动（spec §5 无漂移）
 - [x] **任务工作区化第一步**：repos 注册端点（校验 git、注销不动磁盘）+ `DELETE /api/tasks/:id/worktrees` 一键清理（面板任务条目 hover 出"清理"按钮）
 - 测试 352 → 378 全绿；真实冒烟：SSE chunk 逐段到达、worktree 清理精确
+
+## Day 3 续 2 — Annotate 精简版 + session 追问（Orca 招牌评审闭环）
+
+- [x] **vendor Orca 批注契约**：`src/review/annotate.ts`（formatDiffComments，34 行纯函数零耦合，MIT 头 + 来源 commit 438603f9 注明）；"一批 = 一轮思考"设计哲学随代码落地
+- [x] **追问端点** `POST /api/tasks/:id/followup`：解析 lane 流文件里最后一个 `kimi -r session_*` → 同会话续改（cwd=lane worktree）；无 session → fallback 新 kimi -p 带 原任务+当前 diff+批注。状态 running→awaiting_pick，diff git 重算，JSONL 落 followup 生命周期事件
+- [x] **面板批注 UI**：diff 行/文件头 hover 出 + → 行内批注框（⌘Enter 存/Esc 取消）→ 批注 pin 行下 → "Send notes to agent (n)" → 直播区自动接 followup-N 流；批注随任务持久化
+- [x] **真实冒烟全链路**：single 建 hello.txt → 行批注 → followup 续上同一 kimi session（流文件尾 session id 一致）→ diff 更新为修改后内容
+- 直播顺手立功：抓到 qwen 实际 API 400（模型 id 不被支持，非限流）——待用户处理配置
+- 测试 378 → 399 全绿
