@@ -235,3 +235,10 @@ bun run dev
 - [x] spec 表单一事实来源（`src/agentContext/specs.ts`：8 CLI 命令 + 15 REST 端点，含参数 schema/示例/token 需求）；`--agent-context` 机器可读 JSON + `--help` 从同表生成（三方物理防互漂）；`GET /api/agent-context` 公开端点（与 /api/health 同级免 token）
 - [x] 双向防漂移契约测试：consoleServer 路由增删 → 红；spec 描述了不存在的路由 → 红
 - 测试 399 → 408 全绿；`--help` 先于 prompt 解析（修了"误把 --help 当任务跑"的坑）
+
+## Day 3 续 4 — deepseek 入队（qwen 400 的替代战力）
+
+- [x] 直播抓到 qwen 真相：ModelScope `400 has no provider supported`（非限流，模型 id 下架）；用户给 DeepSeek key（余粮）
+- [x] **零新二进制方案**：deepseek lane 骑 qwen 二进制的 OpenAI 兼容参数（`--openai-base-url https://api.deepseek.com -m deepseek-flash`）；key 走 env 优先 + `.modes-secrets.json`（gitignored，权限 0600，git grep 零命中验证）
+- [x] 真实冒烟：compete kimi vs deepseek 双 success、review tie；`preferredSecondCli()` 单开关，auto/cascade/roundtable/eval 默认拓扑全部切换，qwen 注册一行未删（修好可钉回）
+- 测试 408 → 419 全绿；每夜 eval 下一跑自动用新编制
