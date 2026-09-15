@@ -15,6 +15,10 @@ import type { RoundtableResult } from '../src/patterns/roundtable';
 import type { SingleResult } from '../src/patterns/single';
 import { rulesDispatcher, runRouted, type RoutedDispatcher, type RoutedEngines } from '../src/router/runRouted';
 import type { RunTaskResult } from '../src/run/runTask';
+import { preferredSecondCli } from '../src/spawn/cliAdapters';
+
+/** lane B of every default topology: deepseek when keyed, else qwen (mirrors production wiring) */
+const SECOND = preferredSecondCli();
 
 function makeEngines() {
   const competeResult = { taskId: 'task-compete' } as RunTaskResult;
@@ -37,7 +41,7 @@ const aiDecision = (mode: 'single' | 'roundtable'): RoutedDispatcher =>
   async () => ({ mode, confidence: 'high', reason: `AI picked ${mode}`, dispatchSource: 'ai' });
 
 describe('runRouted (rules dispatcher)', () => {
-  it('explicit multi-version intent → runTask with kimi+qwen lanes, kimi reviewer, task_type auto:compete', async () => {
+  it('explicit multi-version intent → runTask with kimi + second-cli lanes, kimi reviewer, task_type auto:compete', async () => {
     const { engines, competeResult } = makeEngines();
     const { classification, result } = await runRouted(
       { prompt: '给我两个方案实现防抖', repoPath: '/repo' },
@@ -51,7 +55,7 @@ describe('runRouted (rules dispatcher)', () => {
       prompt: '给我两个方案实现防抖',
       lanes: [
         { lane: 'A', cli: 'kimi' },
-        { lane: 'B', cli: 'qwen' },
+        { lane: 'B', cli: SECOND },
       ],
       reviewerCli: 'kimi',
       taskType: 'auto:compete',
@@ -62,7 +66,7 @@ describe('runRouted (rules dispatcher)', () => {
     expect(result).toBe(competeResult);
   });
 
-  it('opinion question → runBrainstorm with kimi+qwen lanes, kimi synthesizer, workDir = repoPath, task_type auto:brainstorm', async () => {
+  it('opinion question → runBrainstorm with kimi + second-cli lanes, kimi synthesizer, workDir = repoPath, task_type auto:brainstorm', async () => {
     const { engines, brainstormResult } = makeEngines();
     const { classification, result } = await runRouted(
       { prompt: '你怎么看本地优先软件', repoPath: '/repo' },
@@ -75,7 +79,7 @@ describe('runRouted (rules dispatcher)', () => {
       prompt: '你怎么看本地优先软件',
       lanes: [
         { lane: 'A', cli: 'kimi' },
-        { lane: 'B', cli: 'qwen' },
+        { lane: 'B', cli: SECOND },
       ],
       synthesizerCli: 'kimi',
       workDir: '/repo',
@@ -85,7 +89,7 @@ describe('runRouted (rules dispatcher)', () => {
     expect(result).toBe(brainstormResult);
   });
 
-  it('executional prompt → runCascade with the qwen→kimi chain, task_type auto:cascade', async () => {
+  it('executional prompt → runCascade with the second-cli → kimi chain, task_type auto:cascade', async () => {
     const { engines, cascadeResult } = makeEngines();
     const { classification, result } = await runRouted(
       { prompt: 'Create a file util.js with a clamp function', repoPath: '/repo' },
@@ -97,7 +101,7 @@ describe('runRouted (rules dispatcher)', () => {
     expect(engines.runCascade).toHaveBeenCalledWith({
       repoPath: '/repo',
       prompt: 'Create a file util.js with a clamp function',
-      chain: [{ cli: 'qwen' }, { cli: 'kimi' }],
+      chain: [{ cli: SECOND }, { cli: 'kimi' }],
       taskType: 'auto:cascade',
     });
     expect(engines.runTask).not.toHaveBeenCalled();
@@ -132,7 +136,7 @@ describe('runRouted (AI dispatcher decisions)', () => {
     expect(result).toBe(singleResult);
   });
 
-  it('AI dispatch → roundtable: kimi+qwen at the table, kimi synthesizer, task_type auto:roundtable', async () => {
+  it('AI dispatch → roundtable: kimi + second-cli at the table, kimi synthesizer, task_type auto:roundtable', async () => {
     const { engines, roundtableResult } = makeEngines();
     const { classification, result } = await runRouted(
       { prompt: 'should we rewrite or refactor?', repoPath: '/repo' },
@@ -143,7 +147,7 @@ describe('runRouted (AI dispatcher decisions)', () => {
     expect(classification.mode).toBe('roundtable');
     expect(engines.runRoundtable).toHaveBeenCalledWith({
       prompt: 'should we rewrite or refactor?',
-      clis: ['kimi', 'qwen'],
+      clis: ['kimi', SECOND],
       synthesizerCli: 'kimi',
       workDir: '/repo',
       taskType: 'auto:roundtable',

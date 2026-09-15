@@ -1,7 +1,9 @@
 #!/bin/bash
 # Nightly full eval run (launchd: com.modes.eval) — keeps evals/eval-runs.jsonl
 # growing unattended. PATH is pinned because launchd agents get a minimal
-# environment: kimi/qwen/bun must resolve without a login shell.
+# environment: kimi/qwen/bun must resolve without a login shell (the deepseek
+# lane rides the qwen binary; its key comes from .modes-secrets.json, no env
+# needed).
 set -uo pipefail
 export PATH="$HOME/.kimi-code/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 

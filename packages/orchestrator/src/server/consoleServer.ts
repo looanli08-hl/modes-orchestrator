@@ -28,6 +28,7 @@ import { parseKimiSessionId } from '../review/followup';
 import type { ReviewVerdict } from '../review/crossReview';
 import type { TaskClassification } from '../router/classifyTask';
 import { dispatchTask } from '../router/dispatchTask';
+import { preferredSecondCli } from '../spawn/cliAdapters';
 import { detectClis as probeClis, type CliAvailability } from '../spawn/detectClis';
 import type { LaneStream, LaneStreamHub } from '../spawn/laneStream';
 import type { RepoRegistry } from './repoRegistry';
@@ -200,11 +201,11 @@ export interface ConsoleServerOptions {
 const BODY_LIMIT_BYTES = 1024 * 1024;
 const PANEL_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../panel/index.html');
 
-/** cheapest first — same default as modes-run.ts --mode cascade */
-const DEFAULT_CASCADE_CHAIN: CascadeLevel[] = [{ cli: 'qwen' }, { cli: 'kimi' }];
+/** cheapest first — same default as modes-run.ts --mode cascade (deepseek when keyed, else qwen) */
+const DEFAULT_CASCADE_CHAIN: CascadeLevel[] = [{ cli: preferredSecondCli() }, { cli: 'kimi' }];
 
-/** default table when a roundtable request omits clis */
-const DEFAULT_ROUNDTABLE_CLIS = ['kimi', 'qwen'];
+/** default table when a roundtable request omits clis (deepseek when keyed, else qwen) */
+const DEFAULT_ROUNDTABLE_CLIS = ['kimi', preferredSecondCli()];
 
 /** single runs one shot: the first lit chip, or kimi (kimi → qwen availability preference) */
 const DEFAULT_SINGLE_CLI = 'kimi';

@@ -51,6 +51,17 @@ export function resolveCliBinary(cli: string): string {
   return CLI_BINARIES[cli] ?? cli;
 }
 
+/**
+ * The working second lane CLI for every default topology: deepseek when a key
+ * is configured (qwen's own account is broken — ModelScope 400, 2026-09), qwen
+ * otherwise. qwen stays fully registered; a fixed qwen account makes this
+ * return 'qwen' only when no DeepSeek key exists — pin a call site to 'qwen'
+ * literally if it must never switch.
+ */
+export function preferredSecondCli(): string {
+  return getDeepseekApiKey() ? 'deepseek' : 'qwen';
+}
+
 const DEFAULT_ADAPTER: CliAdapter = { workerArgs: (prompt) => ['-p', prompt] };
 
 export function buildWorkerArgs(cli: string, prompt: string, opts?: SecretsOptions): string[] {

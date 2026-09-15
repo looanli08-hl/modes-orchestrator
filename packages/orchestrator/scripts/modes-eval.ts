@@ -5,8 +5,9 @@
  *         (no arguments runs the core tier; --all runs every scenario;
  *          explicit scenario ids run regardless of tier)
  *
- * Every scenario runs the full pipeline against real CLIs (lanes kimi + qwen,
- * reviewer/synthesizer kimi) in a throwaway git repo, auto-picks, merges, verifies,
+ * Every scenario runs the full pipeline against real CLIs (lanes kimi +
+ * preferredSecondCli() — deepseek when keyed, else qwen — reviewer/synthesizer
+ * kimi) in a throwaway git repo, auto-picks, merges, verifies,
  * and checks the scenario's expectations. A summary line per run is appended to
  * packages/orchestrator/evals/eval-runs.jsonl (gitignored — eval data is not code).
  * Exit code: 0 when every scenario passed, 1 otherwise.
@@ -25,6 +26,7 @@ import { runCascade } from '../src/patterns/cascade';
 import { runRoundtable } from '../src/patterns/roundtable';
 import { runSingle } from '../src/patterns/single';
 import { runTask } from '../src/run/runTask';
+import { preferredSecondCli } from '../src/spawn/cliAdapters';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const evalsDir = path.resolve(here, '..', 'evals');
@@ -42,7 +44,9 @@ if (scenarios.length === 0) {
 }
 
 const scope = ids.length > 0 ? 'selected ids' : all ? 'all tiers' : 'core tier';
-console.log(`modes-eval: ${scenarios.length} scenario(s) (${scope}), real CLIs (lanes kimi+qwen, reviewer/synthesizer kimi)\n`);
+console.log(
+  `modes-eval: ${scenarios.length} scenario(s) (${scope}), real CLIs (lanes kimi+${preferredSecondCli()}, reviewer/synthesizer kimi)\n`
+);
 
 const results = await runEval(
   scenarios,

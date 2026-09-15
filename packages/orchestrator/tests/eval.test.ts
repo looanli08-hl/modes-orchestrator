@@ -22,6 +22,7 @@ import type { CascadeResult } from '../src/patterns/cascade';
 import type { RoundtableResult } from '../src/patterns/roundtable';
 import type { RunTaskResult } from '../src/run/runTask';
 import { EVENT_LOG_SCHEMA_VERSION, type EventLogRole } from '../src/schema/eventLog';
+import { preferredSecondCli } from '../src/spawn/cliAdapters';
 import { appendEvent, readEvents } from '../src/store/eventLogStore';
 
 const execFileAsync = promisify(execFile);
@@ -552,7 +553,13 @@ describe('runEval', () => {
     const r = results[0];
     expect(r.pass).toBe(true);
     expect(r.eventCount).toBe(6); // 2 workers r1 + reviewer + 2 workers r2 + synthesizer
-    expect(r.laneOutcomes).toEqual({ 'r1:kimi': 'success', 'r1:qwen': 'success', 'r2:kimi': 'success', 'r2:qwen': 'success' });
+    const second = preferredSecondCli(); // deepseek when keyed, else qwen
+    expect(r.laneOutcomes).toEqual({
+      'r1:kimi': 'success',
+      [`r1:${second}`]: 'success',
+      'r2:kimi': 'success',
+      [`r2:${second}`]: 'success',
+    });
   });
 
   it('roundtable: missing synthesis or missing roles fail readably', async () => {

@@ -54,11 +54,11 @@ export interface EvalScenario {
   prompt: string;
   /** files to seed into the temp git repo before running (compete, cascade) */
   seedFiles?: Record<string, string>;
-  /** compete lane override; defaults to EVAL_LANES (kimi A / qwen B) in runEval */
+  /** compete lane override; defaults to EVAL_LANES (kimi A / preferredSecondCli() B) in runEval */
   lanes?: { lane: string; cli: string }[];
-  /** cascade chain override (cheapest first); defaults to EVAL_CHAIN (qwen → kimi) in runEval */
+  /** cascade chain override (cheapest first); defaults to EVAL_CHAIN (preferredSecondCli() → kimi) in runEval */
   chain?: { cli: string; timeoutMs?: number }[];
-  /** roundtable participant override; defaults to EVAL_CLIS (kimi + qwen) in runEval */
+  /** roundtable participant override; defaults to EVAL_CLIS (kimi + preferredSecondCli()) in runEval */
   clis?: string[];
   expect: EvalExpectation;
 }

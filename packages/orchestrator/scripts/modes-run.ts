@@ -28,15 +28,16 @@ import { runRoundtable, type RoundtableResult } from '../src/patterns/roundtable
 import { runSingle, type SingleResult } from '../src/patterns/single';
 import { runRouted } from '../src/router/runRouted';
 import { runTask, type RunTaskResult } from '../src/run/runTask';
-import { getDeepseekApiKey } from '../src/spawn/secrets';
+import { preferredSecondCli } from '../src/spawn/cliAdapters';
 
 /**
- * Lane B of the default compete table. qwen's own account is broken (ModelScope
- * 400, 2026-09), so the working second lane is deepseek — the qwen binary pointed
- * at DeepSeek's OpenAI-compatible endpoint (cliAdapters.ts). With no DeepSeek key
- * configured it falls back to qwen. To pin qwen regardless, set this to 'qwen'.
+ * Lane B of every default topology below. qwen's own account is broken
+ * (ModelScope 400, 2026-09), so the working second lane is deepseek — the qwen
+ * binary pointed at DeepSeek's OpenAI-compatible endpoint (cliAdapters.ts).
+ * With no DeepSeek key configured it falls back to qwen. To pin qwen
+ * regardless, replace preferredSecondCli() with 'qwen' at the call site.
  */
-const SECOND_CLI = getDeepseekApiKey() ? 'deepseek' : 'qwen';
+const SECOND_CLI = preferredSecondCli();
 
 function presentBrainstormResult(result: BrainstormResult): void {
   for (const lane of result.lanes) {
@@ -239,13 +240,13 @@ if (mode === 'single') {
 
 if (mode === 'brainstorm') {
   console.log(`prompt: ${prompt}`);
-  console.log('brainstorming with kimi + qwen …\n');
+  console.log(`brainstorming with kimi + ${SECOND_CLI} …\n`);
 
   const result = await runBrainstorm({
     prompt,
     lanes: [
       { lane: 'A', cli: 'kimi' },
-      { lane: 'B', cli: 'qwen' },
+      { lane: 'B', cli: SECOND_CLI },
     ],
     synthesizerCli: 'kimi',
     workDir: repoPath,
@@ -257,11 +258,11 @@ if (mode === 'brainstorm') {
 
 if (mode === 'roundtable') {
   console.log(`prompt: ${prompt}`);
-  console.log('roundtable with kimi + qwen (up to 2 rounds, early stop on consensus) …\n');
+  console.log(`roundtable with kimi + ${SECOND_CLI} (up to 2 rounds, early stop on consensus) …\n`);
 
   const result = await runRoundtable({
     prompt,
-    clis: ['kimi', 'qwen'],
+    clis: ['kimi', SECOND_CLI],
     workDir: repoPath,
   });
 
@@ -272,12 +273,12 @@ if (mode === 'roundtable') {
 if (mode === 'cascade') {
   console.log(`repo: ${repoPath}`);
   console.log(`prompt: ${prompt}`);
-  console.log('cascading qwen → kimi (cheap first, escalate on failure or empty diff) …\n');
+  console.log(`cascading ${SECOND_CLI} → kimi (cheap first, escalate on failure or empty diff) …\n`);
 
   const result = await runCascade({
     repoPath,
     prompt,
-    chain: [{ cli: 'qwen' }, { cli: 'kimi' }],
+    chain: [{ cli: SECOND_CLI }, { cli: 'kimi' }],
   });
 
   await presentCascadeResult(repoPath, result);

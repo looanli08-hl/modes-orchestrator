@@ -97,7 +97,7 @@ export const CLI_SPECS: CliCommandSpec[] = [
   {
     kind: 'cli',
     command: 'modes-run --mode cascade',
-    summary: 'Cheap CLI first (qwen), escalate to the next level (kimi) on failure or empty diff; merge the winner or not.',
+    summary: 'Cheap CLI first (deepseek — qwen when no DeepSeek key is configured), escalate to the next level (kimi) on failure or empty diff; merge the winner or not.',
     usage: RUN_USAGE,
     flags: RUN_FLAGS,
     positionalArgs: RUN_POSITIONALS,

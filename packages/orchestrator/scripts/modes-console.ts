@@ -6,8 +6,9 @@
  * Then open the printed URL. The panel's CLI chips pick which CLIs sit at the
  * table (default kimi + deepseek — qwen when no DeepSeek key is configured,
  * kimi as reviewer/synthesizer, same as modes-run.ts); the cascade chain
- * defaults to qwen → kimi (cheap first), overridable per request. Task history
- * is persisted to
+ * defaults to deepseek → kimi when a DeepSeek key is configured, else
+ * qwen → kimi (cheap first), overridable per request. Task history is
+ * persisted to
  * packages/orchestrator/.modes-console-tasks.json (gitignored) and reloaded on
  * start; tasks caught mid-run by a restart are marked failed. The JSONL event
  * log on disk remains the durable record of the runs themselves.
@@ -32,8 +33,8 @@ import { runRoundtable } from '../src/patterns/roundtable';
 import { runSingle } from '../src/patterns/single';
 import { runTask } from '../src/run/runTask';
 import { runFollowup } from '../src/review/followup';
+import { preferredSecondCli } from '../src/spawn/cliAdapters';
 import { createLaneStreamHub } from '../src/spawn/laneStream';
-import { getDeepseekApiKey } from '../src/spawn/secrets';
 
 const port = Number(process.env.PORT ?? 4177);
 const token = ensureConsoleToken();
@@ -52,8 +53,8 @@ const laneStreams = createLaneStreamHub({
 
 const LANES = [
   { lane: 'A', cli: 'kimi' },
-  // deepseek when a key is configured (qwen's account is broken) — see modes-run.ts SECOND_CLI
-  { lane: 'B', cli: getDeepseekApiKey() ? 'deepseek' : 'qwen' },
+  // deepseek when a key is configured (qwen's account is broken) — cliAdapters.ts preferredSecondCli
+  { lane: 'B', cli: preferredSecondCli() },
 ];
 
 const server = createConsoleServer({
@@ -63,7 +64,7 @@ const server = createConsoleServer({
     runTask({ repoPath, prompt, lanes: lanes ?? LANES, reviewerCli: 'kimi', stream }),
   runBrainstormTask: ({ workDir, prompt, lanes, stream }) =>
     runBrainstorm({ prompt, lanes: lanes ?? LANES, synthesizerCli: 'kimi', workDir, stream }),
-  // the server applies the default chain (qwen → kimi) when the request omits one
+  // the server applies the default chain (second-cli → kimi) when the request omits one
   runCascadeTask: ({ repoPath, prompt, chain, stream }) => runCascade({ repoPath, prompt, chain, stream }),
   runRoundtableTask: ({ workDir, prompt, clis, stream }) => runRoundtable({ prompt, clis, workDir, stream }),
   // the server picks the first lit chip, defaulting to kimi

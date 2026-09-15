@@ -15,6 +15,10 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { classifyTask } from '../src/router/classifyTask';
+import { preferredSecondCli } from '../src/spawn/cliAdapters';
+
+/** the server's default second CLI: deepseek when keyed, else qwen (mirrors production wiring) */
+const SECOND = preferredSecondCli();
 import {
   createConsoleServer,
   type BrainstormEngineResult,
@@ -571,7 +575,7 @@ describe('cascade flow', () => {
     expect(deps.runCascadeTask).toHaveBeenCalledWith({
       repoPath: '/repo',
       prompt: 'cheap first',
-      chain: [{ cli: 'qwen' }, { cli: 'kimi' }],
+      chain: [{ cli: SECOND }, { cli: 'kimi' }],
     });
 
     cascade.resolve(makeCascadeResult(1));
@@ -702,7 +706,7 @@ describe('roundtable flow', () => {
     expect(deps.runRoundtableTask).toHaveBeenCalledWith({
       workDir: process.cwd(),
       prompt: 'discuss it',
-      clis: ['kimi', 'qwen'],
+      clis: ['kimi', SECOND],
     });
 
     roundtable.resolve(makeRoundtableResult());
@@ -924,7 +928,7 @@ describe('auto mode routing', () => {
     expect(deps.runCascadeTask).toHaveBeenCalledWith({
       repoPath: '/repo',
       prompt: 'Create a file util.js with a clamp function',
-      chain: [{ cli: 'qwen' }, { cli: 'kimi' }],
+      chain: [{ cli: SECOND }, { cli: 'kimi' }],
     });
     expect(deps.runCompete).not.toHaveBeenCalled();
     expect(deps.runBrainstormTask).not.toHaveBeenCalled();

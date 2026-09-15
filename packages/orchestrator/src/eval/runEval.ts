@@ -22,22 +22,27 @@ import type { RoundtableOptions, RoundtableResult } from '../patterns/roundtable
 import type { SingleOptions, SingleResult } from '../patterns/single';
 import { rulesDispatcher, runRouted } from '../router/runRouted';
 import type { RunTaskOptions, RunTaskResult } from '../run/runTask';
+import { preferredSecondCli } from '../spawn/cliAdapters';
 import { readEvents } from '../store/eventLogStore';
 import type { EvalScenario } from './scenarios';
 
 const execFileAsync = promisify(execFile);
 
-/** the eval suite always competes the same two real CLIs */
+/**
+ * The eval suite always competes the same two real CLIs: kimi +
+ * preferredSecondCli() — deepseek when a key is configured, else qwen
+ * (qwen's own account is broken, 2026-09; cliAdapters.ts).
+ */
 export const EVAL_LANES = [
   { lane: 'A', cli: 'kimi' },
-  { lane: 'B', cli: 'qwen' },
+  { lane: 'B', cli: preferredSecondCli() },
 ];
 
 /** the eval cascade chain: cheapest first */
-export const EVAL_CHAIN = [{ cli: 'qwen' }, { cli: 'kimi' }];
+export const EVAL_CHAIN = [{ cli: preferredSecondCli() }, { cli: 'kimi' }];
 
 /** the eval roundtable seats the same two real CLIs */
-export const EVAL_CLIS = ['kimi', 'qwen'];
+export const EVAL_CLIS = ['kimi', preferredSecondCli()];
 
 export interface EvalDeps {
   runTask: (options: RunTaskOptions) => Promise<RunTaskResult>;
