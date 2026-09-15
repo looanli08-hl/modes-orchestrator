@@ -4,6 +4,12 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>modes console</title>
+<script>
+// The AionUi shell forwards its own theme switch as ?theme=dark|light (shell
+// patch #4); it wins over prefers-color-scheme via [data-theme] below. No
+// param (standalone console on 4177) keeps the media query behavior.
+(function(){var t=new URLSearchParams(location.search).get("theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t;})();
+</script>
 <style>
   :root {
     color-scheme: light dark;
@@ -50,6 +56,52 @@
       --ask-bg: #161b22;
       --ask-shadow: 0 1px 2px rgba(1, 4, 9, 0.4);
     }
+  }
+  /* explicit override (?theme= from the host shell) — same values as above,
+     attribute specificity beats the media query in both directions */
+  :root[data-theme='light'] {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #f6f8fa;
+    --term-bg: #f6f8fa;
+    --border: #d1d9e0;
+    --fg: #1f2328;
+    --muted: #59636e;
+    --accent: #0969da;
+    --accent-soft: rgba(9, 105, 218, 0.12);
+    --on-accent: #ffffff;
+    --danger: #d1242f;
+    --danger-soft: rgba(209, 36, 47, 0.08);
+    --success: #1a7f37;
+    --warn: #9a6700;
+    --add-fg: #1a7f37;
+    --add-bg: rgba(26, 127, 55, 0.12);
+    --del-fg: #d1242f;
+    --del-bg: rgba(209, 36, 47, 0.1);
+    --ask-bg: #ffffff;
+    --ask-shadow: 0 1px 2px rgba(27, 31, 36, 0.05), 0 8px 24px rgba(27, 31, 36, 0.06);
+  }
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+    --bg: #0d1117;
+    --surface: #161b22;
+    --term-bg: #0d1117;
+    --border: #21262d;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --accent: #2f81f7;
+    --accent-soft: rgba(47, 129, 247, 0.16);
+    --on-accent: #ffffff;
+    --danger: #f85149;
+    --danger-soft: rgba(248, 81, 73, 0.12);
+    --success: #3fb950;
+    --warn: #d29922;
+    --add-fg: #3fb950;
+    --add-bg: rgba(63, 185, 80, 0.15);
+    --del-fg: #f85149;
+    --del-bg: rgba(248, 81, 73, 0.15);
+    --ask-bg: #161b22;
+    --ask-shadow: 0 1px 2px rgba(1, 4, 9, 0.4);
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }

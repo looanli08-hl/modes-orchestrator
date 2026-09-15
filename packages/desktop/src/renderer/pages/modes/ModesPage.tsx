@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useThemeContext } from '@renderer/hooks/context/ThemeContext';
 import { resolveExtensionAssetUrl } from '@/renderer/utils/platform';
 
 // Same asset the ExtensionSettingsPage iframe loads for the modes-console
@@ -12,10 +13,17 @@ const PANEL_URL = '/api/extensions/modes-console/assets/assets/index.html';
  * Shell patch #2 (docs/shell-patches.md): full-size /modes page for the
  * orchestration console. Pure container — the panel itself is served by
  * aioncore and is not duplicated here.
+ *
+ * Shell patch #4: forward the shell's own theme switch to the panel as
+ * ?theme=dark|light (the panel honors it over prefers-color-scheme). The src
+ * only changes when the theme itself flips — one iframe reload per manual
+ * switch, none on re-renders.
  */
 const ModesPage: React.FC = () => {
   const { t } = useTranslation();
+  const { theme } = useThemeContext();
   const [loading, setLoading] = useState(true);
+  const src = useMemo(() => `${resolveExtensionAssetUrl(PANEL_URL)}?theme=${theme}`, [theme]);
 
   return (
     <div className='relative w-full h-full min-h-0'>
@@ -25,7 +33,7 @@ const ModesPage: React.FC = () => {
         </div>
       )}
       <iframe
-        src={resolveExtensionAssetUrl(PANEL_URL)}
+        src={src}
         onLoad={() => setLoading(false)}
         sandbox='allow-scripts allow-same-origin'
         className='w-full h-full border-none'
