@@ -242,3 +242,8 @@ bun run dev
 - [x] **零新二进制方案**：deepseek lane 骑 qwen 二进制的 OpenAI 兼容参数（`--openai-base-url https://api.deepseek.com -m deepseek-flash`）；key 走 env 优先 + `.modes-secrets.json`（gitignored，权限 0600，git grep 零命中验证）
 - [x] 真实冒烟：compete kimi vs deepseek 双 success、review tie；`preferredSecondCli()` 单开关，auto/cascade/roundtable/eval 默认拓扑全部切换，qwen 注册一行未删（修好可钉回）
 - 测试 408 → 419 全绿；每夜 eval 下一跑自动用新编制
+
+## Day 3 续 5 — 壳补丁 #4：面板主题与壳联动
+
+- [x] ModesPage 从 useThemeContext 取壳主题，iframe src 拼 `?theme=dark|light`（useMemo 稳定 src，切主题重载一次）；面板首绘前内联脚本读 URL 参数写 `data-theme`，属性选择器优先级高于 prefers-color-scheme（standalone 无参数行为不变）；ExtensionSettingsPage 是上游统一组件故意不改（入册注明）
+- [x] Playwright 反向 media 验证：参数两个方向都赢过 media query；419 全绿
