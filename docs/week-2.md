@@ -229,3 +229,9 @@ bun run dev
 - [x] **真实冒烟全链路**：single 建 hello.txt → 行批注 → followup 续上同一 kimi session（流文件尾 session id 一致）→ diff 更新为修改后内容
 - 直播顺手立功：抓到 qwen 实际 API 400（模型 id 不被支持，非限流）——待用户处理配置
 - 测试 378 → 399 全绿
+
+## Day 3 续 3 — agent-context 自描述（抄 Orca 的"agent 驱动产品"）
+
+- [x] spec 表单一事实来源（`src/agentContext/specs.ts`：8 CLI 命令 + 15 REST 端点，含参数 schema/示例/token 需求）；`--agent-context` 机器可读 JSON + `--help` 从同表生成（三方物理防互漂）；`GET /api/agent-context` 公开端点（与 /api/health 同级免 token）
+- [x] 双向防漂移契约测试：consoleServer 路由增删 → 红；spec 描述了不存在的路由 → 红
+- 测试 399 → 408 全绿；`--help` 先于 prompt 解析（修了"误把 --help 当任务跑"的坑）
