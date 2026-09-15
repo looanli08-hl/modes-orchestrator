@@ -286,7 +286,7 @@ describe('token auth + CORS', () => {
     const baseUrl = await startServer(authedDeps());
     const res = await fetch(`${baseUrl}/api/tasks`, { method: 'OPTIONS' });
     expect(res.status).toBe(204);
-    expect(res.headers.get('access-control-allow-methods')).toBe('GET, POST, OPTIONS');
+    expect(res.headers.get('access-control-allow-methods')).toBe('GET, POST, DELETE, OPTIONS');
     expect(res.headers.get('access-control-allow-headers')).toBe('content-type, x-modes-token');
   });
 

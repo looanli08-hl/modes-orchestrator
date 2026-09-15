@@ -15,9 +15,13 @@
  * packages/orchestrator/.modes-console-token (created on first run, 0600).
  */
 
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { createConsoleServer } from '../src/server/consoleServer';
 import { ensureConsoleToken } from '../src/server/consoleToken';
 import { createFilePersistence } from '../src/server/filePersistence';
+import { CONSOLE_REPOS_PATH, createRepoRegistry } from '../src/server/repoRegistry';
 import { createTaskRegistry } from '../src/server/taskRegistry';
 import { mergeLane } from '../src/gate/mergeLane';
 import { recordUserPick } from '../src/gate/recordUserPick';
@@ -26,12 +30,22 @@ import { runCascade } from '../src/patterns/cascade';
 import { runRoundtable } from '../src/patterns/roundtable';
 import { runSingle } from '../src/patterns/single';
 import { runTask } from '../src/run/runTask';
+import { createLaneStreamHub } from '../src/spawn/laneStream';
 
 const port = Number(process.env.PORT ?? 4177);
 const token = ensureConsoleToken();
 
 const registry = createTaskRegistry({ persistence: createFilePersistence() });
 await registry.init();
+
+const repos = createRepoRegistry({ persistence: createFilePersistence(CONSOLE_REPOS_PATH) });
+await repos.init();
+
+// live lane output: one raw-text file per (task, lane), tail-capped at 2 MB;
+// packages/orchestrator/evals/ is gitignored
+const laneStreams = createLaneStreamHub({
+  dir: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../evals/streams'),
+});
 
 const LANES = [
   { lane: 'A', cli: 'kimi' },
@@ -40,19 +54,20 @@ const LANES = [
 
 const server = createConsoleServer({
   token,
-  runCompete: ({ repoPath, prompt, lanes }) =>
-    runTask({ repoPath, prompt, lanes: lanes ?? LANES, reviewerCli: 'kimi' }),
-  runBrainstormTask: ({ workDir, prompt, lanes }) =>
-    runBrainstorm({ prompt, lanes: lanes ?? LANES, synthesizerCli: 'kimi', workDir }),
+  laneStreams,
+  runCompete: ({ repoPath, prompt, lanes, stream }) =>
+    runTask({ repoPath, prompt, lanes: lanes ?? LANES, reviewerCli: 'kimi', stream }),
+  runBrainstormTask: ({ workDir, prompt, lanes, stream }) =>
+    runBrainstorm({ prompt, lanes: lanes ?? LANES, synthesizerCli: 'kimi', workDir, stream }),
   // the server applies the default chain (qwen → kimi) when the request omits one
-  runCascadeTask: ({ repoPath, prompt, chain }) => runCascade({ repoPath, prompt, chain }),
-  runRoundtableTask: ({ workDir, prompt, clis }) => runRoundtable({ prompt, clis, workDir }),
+  runCascadeTask: ({ repoPath, prompt, chain, stream }) => runCascade({ repoPath, prompt, chain, stream }),
+  runRoundtableTask: ({ workDir, prompt, clis, stream }) => runRoundtable({ prompt, clis, workDir, stream }),
   // the server picks the first lit chip, defaulting to kimi
-  runSingleTask: ({ repoPath, prompt, cli }) => runSingle({ repoPath, prompt, cli }),
+  runSingleTask: ({ repoPath, prompt, cli, stream }) => runSingle({ repoPath, prompt, cli, stream }),
   // auto uses the server's default: the AI dispatcher (kimi call + rule fallback)
   recordPick: (eventsFile, opts) => recordUserPick(eventsFile, opts),
   mergeLane: (opts) => mergeLane(opts),
-}, { registry });
+}, { registry, repos });
 
 server.listen(port, '127.0.0.1', () => {
   console.log(`modes console listening at http://127.0.0.1:${port}`);

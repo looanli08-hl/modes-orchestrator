@@ -20,6 +20,7 @@ import { makeRealDeps } from '../fanout/realDeps';
 import { parseWorkerOutput } from '../parse/workerOutput';
 import { EVENT_LOG_SCHEMA_VERSION, type EventLogOutcome } from '../schema/eventLog';
 import { buildWorkerArgs } from '../spawn/cliAdapters';
+import type { LaneStream } from '../spawn/laneStream';
 import { resolveModelId } from '../spawn/modelResolution';
 import { appendEvent } from '../store/eventLogStore';
 
@@ -35,6 +36,8 @@ export interface RoundtableOptions {
   synthesizerCli?: string;
   timeoutMs?: number;
   taskType?: string;
+  /** optional per-task lane output sink — lanes' stdout/stderr stream into it live */
+  stream?: LaneStream;
 }
 
 export interface RoundtableLaneResult {
@@ -121,7 +124,7 @@ export async function runRoundtable(options: RoundtableOptions): Promise<Roundta
   const taskId = `task-${Date.now().toString(36)}`;
   const eventsFile = path.join(options.workDir, '.modes', 'events.jsonl');
   await mkdir(path.dirname(eventsFile), { recursive: true });
-  const deps = makeRealDeps(options.workDir, { taskId, timeoutMs: options.timeoutMs });
+  const deps = makeRealDeps(options.workDir, { taskId, timeoutMs: options.timeoutMs, stream: options.stream });
   // Physical isolation: lanes think in a scratch dir so a rogue worker can never write
   // into the user's workDir (same lesson as brainstorm)
   const scratchDir = await mkdtemp(path.join(os.tmpdir(), 'modes-roundtable-lanes-'));
@@ -165,7 +168,7 @@ export async function runRoundtable(options: RoundtableOptions): Promise<Roundta
     const lanes = await Promise.all(
       participants.map(async ({ cli }): Promise<RoundtableLaneResult> => {
         const started = Date.now();
-        const raw = await deps.spawnProcess(cli, buildWorkerArgs(cli, promptFor(cli)), { cwd: scratchDir });
+        const raw = await deps.spawnProcess(cli, buildWorkerArgs(cli, promptFor(cli)), { cwd: scratchDir, lane: cli });
         const parsed = parseWorkerOutput(raw);
         // oxlint-disable-next-line no-await-in-loop -- append-only log: writes must stay ordered
         await logEvent(cli, `${taskId}-${cli}-r${round}`, cli, 'worker', parsed.outcome, started);
@@ -201,7 +204,7 @@ export async function runRoundtable(options: RoundtableOptions): Promise<Roundta
       const raw = await deps.spawnProcess(
         synthesizerCli,
         buildWorkerArgs(synthesizerCli, buildConsensusPrompt(options.prompt, survivors)),
-        { cwd: scratchDir }
+        { cwd: scratchDir, lane: `consensus-r${round}` }
       );
       const parsed = parseWorkerOutput(raw);
       // oxlint-disable-next-line no-await-in-loop -- append-only log: writes must stay ordered
@@ -226,7 +229,7 @@ export async function runRoundtable(options: RoundtableOptions): Promise<Roundta
       const raw = await deps.spawnProcess(
         synthesizerCli,
         buildWorkerArgs(synthesizerCli, buildSynthesisPrompt(options.prompt, rounds.length, finalAnswers)),
-        { cwd: scratchDir }
+        { cwd: scratchDir, lane: 'synthesis' }
       );
       const parsed = parseWorkerOutput(raw);
       if (parsed.outcome === 'success') {

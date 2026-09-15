@@ -24,6 +24,7 @@ import { parseWorkerOutput } from '../parse/workerOutput';
 import { EVENT_LOG_SCHEMA_VERSION, type EventLogOutcome } from '../schema/eventLog';
 import { createResultStore } from '../settlement/settleResult';
 import { buildWorkerArgs } from '../spawn/cliAdapters';
+import type { LaneStream } from '../spawn/laneStream';
 import { resolveModelId } from '../spawn/modelResolution';
 import { appendEvent } from '../store/eventLogStore';
 
@@ -39,6 +40,8 @@ export interface CascadeOptions {
   /** cheapest first */
   chain: CascadeLevel[];
   taskType?: string;
+  /** optional per-task lane output sink — each level's stdout/stderr streams into it live */
+  stream?: LaneStream;
 }
 
 export interface CascadeDeps extends FanOutDeps {
@@ -86,7 +89,7 @@ export async function runCascade(options: CascadeOptions, deps?: CascadeDeps): P
     // Real deps are built per level so a per-level timeoutMs applies; injected
     // (fake) deps control timing themselves.
     const levelDeps: CascadeDeps =
-      deps ?? { ...makeRealDeps(options.repoPath, { taskId, timeoutMs: entry.timeoutMs }), diffWorktree };
+      deps ?? { ...makeRealDeps(options.repoPath, { taskId, timeoutMs: entry.timeoutMs, stream: options.stream }), diffWorktree };
 
     const started = Date.now();
     // oxlint-disable-next-line no-await-in-loop -- serial chain: each level waits for the previous verdict
@@ -94,6 +97,7 @@ export async function runCascade(options: CascadeOptions, deps?: CascadeDeps): P
     // oxlint-disable-next-line no-await-in-loop -- serial chain: each level waits for the previous verdict
     const raw: SpawnedProcessResult = await levelDeps.spawnProcess(entry.cli, buildWorkerArgs(entry.cli, options.prompt), {
       cwd: worktreePath,
+      lane: laneKey,
     });
     const latency = Date.now() - started;
     const parsed = parseWorkerOutput(raw);

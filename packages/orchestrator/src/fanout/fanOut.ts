@@ -30,7 +30,8 @@ export interface SpawnedProcessResult {
 
 export interface FanOutDeps {
   createWorktree: (lane: string) => Promise<string>;
-  spawnProcess: (cli: string, args: string[], opts: { cwd: string }) => Promise<SpawnedProcessResult>;
+  /** opts.lane labels the lane for live-output streaming; defaults to the cli name when omitted */
+  spawnProcess: (cli: string, args: string[], opts: { cwd: string; lane?: string }) => Promise<SpawnedProcessResult>;
 }
 
 export interface FanOutLaneResult {
@@ -61,7 +62,7 @@ export async function fanOut(options: FanOutOptions, deps: FanOutDeps): Promise<
     options.lanes.map(async ({ lane, cli }) => {
       const started = Date.now();
       const cwd = await deps.createWorktree(lane);
-      const result = await deps.spawnProcess(cli, buildWorkerArgs(cli, options.prompt), { cwd });
+      const result = await deps.spawnProcess(cli, buildWorkerArgs(cli, options.prompt), { cwd, lane });
       return {
         lane,
         outcome: result.exitCode === 0 ? ('success' as const) : ('failed' as const),

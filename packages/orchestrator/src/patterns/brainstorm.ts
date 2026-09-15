@@ -13,6 +13,7 @@ import { makeRealDeps } from '../fanout/realDeps';
 import { parseWorkerOutput } from '../parse/workerOutput';
 import { EVENT_LOG_SCHEMA_VERSION, type EventLogOutcome } from '../schema/eventLog';
 import { buildWorkerArgs } from '../spawn/cliAdapters';
+import type { LaneStream } from '../spawn/laneStream';
 import { resolveModelId } from '../spawn/modelResolution';
 import { appendEvent } from '../store/eventLogStore';
 
@@ -30,6 +31,8 @@ export interface BrainstormOptions {
   workDir: string;
   taskType?: string;
   timeoutMs?: number;
+  /** optional per-task lane output sink — lanes' stdout/stderr stream into it live */
+  stream?: LaneStream;
 }
 
 export interface BrainstormLaneResult {
@@ -50,7 +53,7 @@ export async function runBrainstorm(options: BrainstormOptions): Promise<Brainst
   const taskId = `task-${Date.now().toString(36)}`;
   const eventsFile = path.join(options.workDir, '.modes', 'events.jsonl');
   await mkdir(path.dirname(eventsFile), { recursive: true });
-  const deps = makeRealDeps(options.workDir, { taskId, timeoutMs: options.timeoutMs });
+  const deps = makeRealDeps(options.workDir, { taskId, timeoutMs: options.timeoutMs, stream: options.stream });
   // Physical isolation: lanes think in a scratch dir so a rogue worker can never write
   // into the user's workDir (observed: a real synthesizer lane wrote an analysis doc unprompted)
   const scratchDir = await mkdtemp(path.join(os.tmpdir(), 'modes-brainstorm-lanes-'));
@@ -59,7 +62,7 @@ export async function runBrainstorm(options: BrainstormOptions): Promise<Brainst
     const lanes = await Promise.all(
       options.lanes.map(async ({ lane, cli }): Promise<BrainstormLaneResult> => {
         const started = Date.now();
-        const raw = await deps.spawnProcess(cli, buildWorkerArgs(cli, options.prompt), { cwd: scratchDir });
+        const raw = await deps.spawnProcess(cli, buildWorkerArgs(cli, options.prompt), { cwd: scratchDir, lane });
         const parsed = parseWorkerOutput(raw);
         // oxlint-disable-next-line no-await-in-loop -- append-only log: writes must stay ordered
         await appendEvent(eventsFile, {
@@ -101,6 +104,7 @@ ${survivors.map((l) => `=== ANSWER ${l.lane} ===\n${l.answer}`).join('\n\n')}
       const started = Date.now();
       const raw = await deps.spawnProcess(synthesizerCli, buildWorkerArgs(synthesizerCli, synthesisPrompt), {
         cwd: scratchDir,
+        lane: 'synthesis',
       });
       const parsed = parseWorkerOutput(raw);
       if (parsed.outcome === 'success') {

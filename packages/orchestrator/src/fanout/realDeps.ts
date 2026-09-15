@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import type { LaneStream } from '../spawn/laneStream';
 import type { FanOutDeps, SpawnedProcessResult } from './fanOut';
 
 const execFileAsync = promisify(execFile);
@@ -20,6 +21,12 @@ export interface RealDepsOptions {
   taskId: string;
   /** kill the lane after this many ms (default 10 min) */
   timeoutMs?: number;
+  /**
+   * optional per-task lane output sink: stdout/stderr chunks are mirrored into
+   * it as they arrive (live streaming to the console). Purely observational —
+   * the spawn result and the kill timer are unaffected.
+   */
+  stream?: LaneStream;
 }
 
 export function makeRealDeps(repoPath: string, options: RealDepsOptions): FanOutDeps {
@@ -68,8 +75,16 @@ export function makeRealDeps(repoPath: string, options: RealDepsOptions): FanOut
           setTimeout(() => killGroup('SIGKILL'), 5000).unref();
         }, timeoutMs);
 
-        child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString('utf8')));
-        child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString('utf8')));
+        child.stdout.on('data', (chunk: Buffer) => {
+          const text = chunk.toString('utf8');
+          stdout += text;
+          options.stream?.write(opts.lane ?? cli, text);
+        });
+        child.stderr.on('data', (chunk: Buffer) => {
+          const text = chunk.toString('utf8');
+          stderr += text;
+          options.stream?.write(opts.lane ?? cli, text);
+        });
         child.on('error', reject);
         child.on('close', (code) => {
           clearTimeout(killTimer);

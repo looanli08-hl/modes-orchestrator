@@ -145,6 +145,18 @@
   .task-item .ti-mode { font-size: 11px; color: var(--muted); }
   .task-item .ti-mode .auto-mark { color: var(--accent); }
   .task-item .ti-time { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .task-item .ti-clean {
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-size: 11px;
+    padding: 0 2px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: none;
+  }
+  .task-item:hover .ti-clean { display: inline; }
+  .task-item .ti-clean:hover { color: var(--danger); }
 
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
   .dot.st-running { background: var(--accent); animation: breathe 1.6s ease-in-out infinite; }
@@ -594,6 +606,7 @@ const apiUrl = {
     VIA_EXTENSION_PROXY ? `${API_BASE}/task?id=${encodeURIComponent(id)}` : `${API_BASE}/tasks/${encodeURIComponent(id)}`,
   pick: (id) =>
     VIA_EXTENSION_PROXY ? `${API_BASE}/pick` : `${API_BASE}/tasks/${encodeURIComponent(id)}/pick`,
+  worktrees: (id) => `${API_BASE}/tasks/${encodeURIComponent(id)}/worktrees`,
   // EventSource cannot send headers, so the shared token rides as ?token= (the
   // server honors it on this route only). No events route exists on the
   // extension proxy — SSE is skipped there and polling is used.
@@ -811,9 +824,24 @@ function renderTaskItem(t) {
       <div class="meta">
         <span class="dot st-${esc(t.status)}"></span>
         <span class="ti-mode">${esc(t.mode)}${t.classification ? ` <span class="auto-mark">· auto</span>` : ""}</span>
+        ${t.status !== "running" ? `<button type="button" class="ti-clean" data-id="${esc(t.id)}" title="清理该任务的 worktree 和分支（不动任务记录）">清理</button>` : ""}
         <span class="ti-time">${esc(relativeTime(t.createdAt))}</span>
       </div>
     </div>`;
+}
+
+async function cleanWorktrees(id, btn) {
+  btn.disabled = true;
+  try {
+    const res = await api(apiUrl.worktrees(id), { method: "DELETE" });
+    const failed = res.failed?.length ? `，失败 ${res.failed.length} 项` : "";
+    btn.textContent = `已清 ${res.removed.length}${failed}`;
+    btn.title = res.failed?.map((f) => `${f.target}: ${f.error}`).join("\n") || "worktree 已清理";
+  } catch (err) {
+    btn.textContent = "清理失败";
+    btn.title = err.message;
+    btn.disabled = false;
+  }
 }
 
 async function refreshTaskList() {
@@ -833,6 +861,12 @@ async function refreshTaskList() {
   box.innerHTML = html;
   for (const el of document.querySelectorAll(".task-item")) {
     el.addEventListener("click", () => selectTask(el.dataset.id));
+  }
+  for (const el of document.querySelectorAll(".ti-clean")) {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation(); // don't select the task when cleaning it
+      cleanWorktrees(el.dataset.id, el);
+    });
   }
 }
 

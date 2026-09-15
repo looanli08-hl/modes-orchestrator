@@ -15,6 +15,7 @@ import { createTaskLifecycle, type TaskState } from '../gate/userGate';
 import { parseWorkerOutput } from '../parse/workerOutput';
 import { buildReviewPrompt, parseReviewVerdict, type ReviewVerdict } from '../review/crossReview';
 import { buildWorkerArgs } from '../spawn/cliAdapters';
+import type { LaneStream } from '../spawn/laneStream';
 import { resolveModelId } from '../spawn/modelResolution';
 import { EVENT_LOG_SCHEMA_VERSION, type EventLogOutcome } from '../schema/eventLog';
 import { createResultStore } from '../settlement/settleResult';
@@ -28,6 +29,8 @@ export interface RunTaskOptions {
   reviewerCli?: string;
   taskType?: string;
   timeoutMs?: number;
+  /** optional per-task lane output sink — lanes' stdout/stderr stream into it live */
+  stream?: LaneStream;
 }
 
 export interface RunTaskLaneResult {
@@ -53,7 +56,7 @@ export async function runTask(options: RunTaskOptions): Promise<RunTaskResult> {
   await mkdir(path.dirname(eventsFile), { recursive: true });
   const lifecycle = createTaskLifecycle(taskId, { lanes: options.lanes.map((l) => l.lane) });
   const store = createResultStore();
-  const deps = makeRealDeps(options.repoPath, { taskId, timeoutMs: options.timeoutMs });
+  const deps = makeRealDeps(options.repoPath, { taskId, timeoutMs: options.timeoutMs, stream: options.stream });
 
   lifecycle.advance('begin_fanout');
   const fan = await fanOut({ repoPath: options.repoPath, prompt: options.prompt, lanes: options.lanes }, deps);
@@ -126,6 +129,7 @@ export async function runTask(options: RunTaskOptions): Promise<RunTaskResult> {
     const started = Date.now();
     const raw = await deps.spawnProcess(reviewerCli, buildWorkerArgs(reviewerCli, reviewPrompt), {
       cwd: options.repoPath,
+      lane: 'review',
     });
     const parsed = parseWorkerOutput(raw);
     review =

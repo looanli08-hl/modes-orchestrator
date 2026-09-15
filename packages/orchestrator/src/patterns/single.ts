@@ -20,6 +20,7 @@ import type { FanOutDeps, SpawnedProcessResult } from '../fanout/fanOut';
 import { parseWorkerOutput } from '../parse/workerOutput';
 import { EVENT_LOG_SCHEMA_VERSION, type EventLogOutcome } from '../schema/eventLog';
 import { buildWorkerArgs } from '../spawn/cliAdapters';
+import type { LaneStream } from '../spawn/laneStream';
 import { resolveModelId } from '../spawn/modelResolution';
 import { appendEvent } from '../store/eventLogStore';
 
@@ -31,6 +32,8 @@ export interface SingleOptions {
   /** kill the lane after this many ms (default 10 min) */
   timeoutMs?: number;
   taskType?: string;
+  /** optional per-task lane output sink — the lane's stdout/stderr streams into it live */
+  stream?: LaneStream;
 }
 
 export interface SingleDeps extends FanOutDeps {
@@ -58,12 +61,14 @@ export async function runSingle(options: SingleOptions, deps?: SingleDeps): Prom
   const taskId = `task-${Date.now().toString(36)}`;
   const eventsFile = path.join(options.repoPath, '.modes', 'events.jsonl');
   await mkdir(path.dirname(eventsFile), { recursive: true });
-  const laneDeps: SingleDeps = deps ?? { ...makeRealDeps(options.repoPath, { taskId, timeoutMs: options.timeoutMs }), diffWorktree };
+  const laneDeps: SingleDeps =
+    deps ?? { ...makeRealDeps(options.repoPath, { taskId, timeoutMs: options.timeoutMs, stream: options.stream }), diffWorktree };
 
   const started = Date.now();
   const worktreePath = await laneDeps.createWorktree('single');
   const raw: SpawnedProcessResult = await laneDeps.spawnProcess(options.cli, buildWorkerArgs(options.cli, options.prompt), {
     cwd: worktreePath,
+    lane: 'single',
   });
   const latency = Date.now() - started;
   const parsed = parseWorkerOutput(raw);

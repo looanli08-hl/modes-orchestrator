@@ -24,6 +24,10 @@ import type { ReviewVerdict } from '../review/crossReview';
 import type { TaskClassification } from '../router/classifyTask';
 import { dispatchTask } from '../router/dispatchTask';
 import { detectClis as probeClis, type CliAvailability } from '../spawn/detectClis';
+import type { LaneStream, LaneStreamHub } from '../spawn/laneStream';
+import type { RepoRegistry } from './repoRegistry';
+import { createRepoRegistry } from './repoRegistry';
+import { cleanTaskWorktrees, type WorktreeCleanupResult } from './worktreeCleanup';
 import {
   createTaskRegistry,
   isUserPick,
@@ -88,15 +92,44 @@ export interface ConsoleDeps {
    * same-origin/loopback readers only). Unset = legacy open behavior.
    */
   token?: string;
-  runCompete(options: { repoPath: string; prompt: string; lanes?: ConsoleLaneSpec[] }): Promise<CompeteEngineResult>;
+  runCompete(options: {
+    repoPath: string;
+    prompt: string;
+    lanes?: ConsoleLaneSpec[];
+    stream?: LaneStream;
+  }): Promise<CompeteEngineResult>;
   runBrainstormTask(options: {
     workDir: string;
     prompt: string;
     lanes?: ConsoleLaneSpec[];
+    stream?: LaneStream;
   }): Promise<BrainstormEngineResult>;
-  runCascadeTask(options: { repoPath: string; prompt: string; chain: CascadeLevel[] }): Promise<CascadeEngineResult>;
-  runRoundtableTask(options: { workDir: string; prompt: string; clis: string[] }): Promise<RoundtableEngineResult>;
-  runSingleTask(options: { repoPath: string; prompt: string; cli: string }): Promise<SingleEngineResult>;
+  runCascadeTask(options: {
+    repoPath: string;
+    prompt: string;
+    chain: CascadeLevel[];
+    stream?: LaneStream;
+  }): Promise<CascadeEngineResult>;
+  runRoundtableTask(options: {
+    workDir: string;
+    prompt: string;
+    clis: string[];
+    stream?: LaneStream;
+  }): Promise<RoundtableEngineResult>;
+  runSingleTask(options: { repoPath: string; prompt: string; cli: string; stream?: LaneStream }): Promise<SingleEngineResult>;
+  /**
+   * Live lane output hub. When set, every task run gets a per-task sink bound
+   * to its console id (stdout/stderr chunks stream into per-lane files under
+   * the hub's dir), GET /api/tasks/:id/events pushes batched `lane_output`
+   * events, and GET /api/tasks/:id/lanes/:lane/output serves catch-up reads.
+   */
+  laneStreams?: LaneStreamHub;
+  /**
+   * DELETE /api/tasks/:id/worktrees — remove the task's `.modes-worktrees/`
+   * dirs and `modes/<taskId>-*` branches. Injectable for tests; defaults to
+   * the real git implementation in worktreeCleanup.ts.
+   */
+  cleanWorktrees?: (options: { repoPath: string; engineTaskId: string }) => Promise<WorktreeCleanupResult>;
   /**
    * auto-mode dispatcher: resolves the routing decision asynchronously (the
    * default is the AI dispatcher — a kimi call with rule fallback built in).
@@ -123,6 +156,8 @@ export interface ConsoleServerOptions {
   panelPath?: string;
   /** injectable registry (tests); defaults to a fresh in-memory one */
   registry?: TaskRegistry;
+  /** registered repos (POST/GET/DELETE /api/repos); defaults to a fresh in-memory one */
+  repos?: RepoRegistry;
 }
 
 const BODY_LIMIT_BYTES = 1024 * 1024;
@@ -209,11 +244,18 @@ const SSE_TERMINAL_STATUSES = new Set(['awaiting_pick', 'done', 'failed']);
  * failed). EventSource cannot send custom headers, so this route also accepts
  * the token as a ?token= query parameter (loopback console, same value as the
  * x-modes-token header; CORS stays open and useless without it).
+ *
+ * When a lane stream hub is wired, stdout/stderr chunks arrive as separate
+ * named events (`event: lane_output`, data { lane, chunk }, batched by the
+ * hub) interleaved with the default task-state `message` events. Chunks are
+ * also mirrored to per-lane stream files — reconnecting readers catch up via
+ * GET /api/tasks/:id/lanes/:lane/output?offset= instead of replaying SSE.
  */
 function handleTaskEvents(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   registry: TaskRegistry,
+  laneStreams: LaneStreamHub | undefined,
   taskId: string
 ): void {
   const task = registry.get(taskId);
@@ -228,7 +270,13 @@ function handleTaskEvents(
   const send = (t: ConsoleTask): void => {
     res.write(`data: ${JSON.stringify(taskDetailView(t))}\n\n`);
   };
+  const unsubscribeOutput = laneStreams?.subscribe(taskId, (event) => {
+    res.write(`event: lane_output\ndata: ${JSON.stringify({ lane: event.lane, chunk: event.chunk })}\n\n`);
+  });
   const close = (): void => {
+    // drain buffered lane_output batches first so the terminal close never drops output
+    laneStreams?.flush(taskId);
+    unsubscribeOutput?.();
     unsubscribe();
     res.end();
   };
@@ -237,7 +285,10 @@ function handleTaskEvents(
     send(changed);
     if (SSE_TERMINAL_STATUSES.has(changed.status)) close();
   });
-  req.on('close', unsubscribe);
+  req.on('close', () => {
+    unsubscribe();
+    unsubscribeOutput?.();
+  });
 
   send(task);
   // late subscribers to an already-finished task get the final state and a clean close
@@ -312,6 +363,7 @@ function taskDetailView(task: ConsoleTask): Record<string, unknown> {
 
 export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOptions = {}): http.Server {
   const registry = options.registry ?? createTaskRegistry();
+  const repos = options.repos ?? createRepoRegistry();
   const panelPath = options.panelPath ?? PANEL_PATH;
   // probing PATH is not cheap and installs rarely change mid-session; a failed
   // probe is never cached so the next request retries
@@ -328,10 +380,13 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     // shape (letters for lanes, order for the cascade chain, first chip for
     // single) lives here
     const lanes = clis?.map((cli, i) => ({ lane: laneLetter(i), cli }));
+    // every mode's lane spawns funnel through realDeps' tap into this sink:
+    // stdout/stderr chunks stream live under this task's console id
+    const stream = deps.laneStreams ? { stream: deps.laneStreams.bind(task.id) } : {};
     const run =
       mode === 'compete'
         ? deps
-            .runCompete({ repoPath: task.repoPath, prompt: task.prompt, ...(lanes ? { lanes } : {}) })
+            .runCompete({ repoPath: task.repoPath, prompt: task.prompt, ...(lanes ? { lanes } : {}), ...stream })
             .then((r) => registry.completeCompete(task.id, r))
         : mode === 'cascade'
           ? deps
@@ -339,6 +394,7 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
                 repoPath: task.repoPath,
                 prompt: task.prompt,
                 chain: chain ?? clis?.map((cli) => ({ cli })) ?? DEFAULT_CASCADE_CHAIN,
+                ...stream,
               })
               .then((r) => registry.completeCascade(task.id, r))
           : mode === 'roundtable'
@@ -347,14 +403,15 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
                   workDir: task.repoPath,
                   prompt: task.prompt,
                   clis: clis ?? DEFAULT_ROUNDTABLE_CLIS,
+                  ...stream,
                 })
                 .then((r) => registry.completeRoundtable(task.id, r))
             : mode === 'single'
               ? deps
-                  .runSingleTask({ repoPath: task.repoPath, prompt: task.prompt, cli: clis?.[0] ?? DEFAULT_SINGLE_CLI })
+                  .runSingleTask({ repoPath: task.repoPath, prompt: task.prompt, cli: clis?.[0] ?? DEFAULT_SINGLE_CLI, ...stream })
                   .then((r) => registry.completeSingle(task.id, r))
               : deps
-                  .runBrainstormTask({ workDir: task.repoPath, prompt: task.prompt, ...(lanes ? { lanes } : {}) })
+                  .runBrainstormTask({ workDir: task.repoPath, prompt: task.prompt, ...(lanes ? { lanes } : {}), ...stream })
                   .then((r) => registry.completeBrainstorm(task.id, r));
     run.catch((err) => registry.fail(task.id, err));
   };
@@ -488,6 +545,65 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     sendJson(res, 200, taskDetailView(task));
   };
 
+  /**
+   * GET /api/tasks/:id/lanes/:lane/output?offset=N — catch-up read of a lane's
+   * stream file. `offset` is a byte offset from a previous response (default 0);
+   * the response carries the content from there plus the new EOF offset. An
+   * offset past EOF (e.g. after tail truncation) restarts from 0 and reports
+   * `truncated: true` once the file has been capped.
+   */
+  const handleLaneOutput = async (res: http.ServerResponse, taskId: string, lane: string, url: URL): Promise<void> => {
+    if (!deps.laneStreams) return sendJson(res, 404, { error: 'lane streams are not enabled on this console' });
+    const task = registry.get(taskId);
+    if (!task) return sendJson(res, 404, { error: `unknown task ${taskId}` });
+    const offsetParam = url.searchParams.get('offset');
+    const offset = offsetParam === null ? 0 : Number(offsetParam);
+    if (!Number.isFinite(offset) || offset < 0) {
+      return sendJson(res, 400, { error: 'offset must be a non-negative byte offset' });
+    }
+    const result = await deps.laneStreams.read(taskId, lane, offset);
+    sendJson(res, 200, { taskId, lane, ...result });
+  };
+
+  const handleCreateRepo = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    let body: unknown;
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch {
+      return sendJson(res, 400, { error: 'invalid JSON body' });
+    }
+    const { path: repoPath } = (body ?? {}) as Record<string, unknown>;
+    if (typeof repoPath !== 'string' || !repoPath.trim()) {
+      return sendJson(res, 400, { error: 'path must be a non-empty string' });
+    }
+    try {
+      const repo = await repos.add(repoPath);
+      sendJson(res, 201, repo);
+    } catch (err) {
+      sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  /**
+   * DELETE /api/tasks/:id/worktrees — reclaim a finished task's workspaces:
+   * `git worktree remove --force` each `.modes-worktrees/<engineTaskId>-*` dir
+   * and `git branch -D` each `modes/<engineTaskId>-*` branch. Failures come
+   * back per target in `failed`; the task record itself is never touched.
+   */
+  const handleCleanWorktrees = async (res: http.ServerResponse, taskId: string): Promise<void> => {
+    const task = registry.get(taskId);
+    if (!task) return sendJson(res, 404, { error: `unknown task ${taskId}` });
+    if (task.status === 'running') {
+      return sendJson(res, 409, { error: `task ${taskId} is still running — its lanes may still be live` });
+    }
+    if (!task.engineTaskId) {
+      return sendJson(res, 409, { error: `task ${taskId} has no engine task id — no worktrees to clean` });
+    }
+    const clean = deps.cleanWorktrees ?? cleanTaskWorktrees;
+    const result = await clean({ repoPath: task.repoPath, engineTaskId: task.engineTaskId });
+    sendJson(res, 200, { taskId: task.id, engineTaskId: task.engineTaskId, ...result });
+  };
+
   return http.createServer(async (req, res) => {
     // Permissive CORS on every response: the AionUi-embedded panel is served
     // from aioncore's origin and calls this server cross-origin. Safe here
@@ -498,7 +614,7 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     res.setHeader('access-control-allow-origin', '*');
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
-        'access-control-allow-methods': 'GET, POST, OPTIONS',
+        'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
         'access-control-allow-headers': 'content-type, x-modes-token',
       });
       return res.end();
@@ -507,6 +623,9 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const pickMatch = /^\/api\/tasks\/([^/]+)\/pick$/.exec(url.pathname);
     const eventsMatch = /^\/api\/tasks\/([^/]+)\/events$/.exec(url.pathname);
+    const laneOutputMatch = /^\/api\/tasks\/([^/]+)\/lanes\/([^/]+)\/output$/.exec(url.pathname);
+    const worktreesMatch = /^\/api\/tasks\/([^/]+)\/worktrees$/.exec(url.pathname);
+    const repoMatch = /^\/api\/repos\/([^/]+)$/.exec(url.pathname);
     const taskMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname);
 
     try {
@@ -539,7 +658,26 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
         return sendJson(res, 200, taskDetailView(task));
       }
       if (req.method === 'GET' && eventsMatch) {
-        return handleTaskEvents(req, res, registry, decodeURIComponent(eventsMatch[1]));
+        return handleTaskEvents(req, res, registry, deps.laneStreams, decodeURIComponent(eventsMatch[1]));
+      }
+      if (req.method === 'GET' && laneOutputMatch) {
+        return await handleLaneOutput(
+          res,
+          decodeURIComponent(laneOutputMatch[1]),
+          decodeURIComponent(laneOutputMatch[2]),
+          url
+        );
+      }
+      if (req.method === 'DELETE' && worktreesMatch) {
+        return await handleCleanWorktrees(res, decodeURIComponent(worktreesMatch[1]));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/repos') return sendJson(res, 200, repos.list());
+      if (req.method === 'POST' && url.pathname === '/api/repos') return await handleCreateRepo(req, res);
+      if (req.method === 'DELETE' && repoMatch) {
+        const removed = repos.remove(decodeURIComponent(repoMatch[1]));
+        if (!removed) return sendJson(res, 404, { error: `unknown repo ${repoMatch[1]}` });
+        // unregistration only — the directory on disk is deliberately untouched
+        return sendJson(res, 200, { removed });
       }
       if (req.method === 'POST' && pickMatch) return await handlePick(req, res, decodeURIComponent(pickMatch[1]));
       sendJson(res, 404, { error: 'not found' });
