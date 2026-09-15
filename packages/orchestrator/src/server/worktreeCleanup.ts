@@ -49,6 +49,33 @@ async function listTaskBranches(repoPath: string, engineTaskId: string): Promise
   return stdout.split('\n').filter(Boolean);
 }
 
+/**
+ * Remove exactly one worktree + its branch — the workspace DELETE path. Same
+ * per-target honest failure reporting as cleanTaskWorktrees: each removal is
+ * attempted independently and failures come back in `failed`, never swallowed.
+ */
+export async function removeWorktreeAndBranch(options: {
+  repoPath: string;
+  worktreePath: string;
+  branch: string;
+}): Promise<WorktreeCleanupResult> {
+  const { repoPath, worktreePath, branch } = options;
+  const result: WorktreeCleanupResult = { removed: [], branches: [], failed: [] };
+  try {
+    await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoPath });
+    result.removed.push(worktreePath);
+  } catch (err) {
+    result.failed.push({ target: worktreePath, error: err instanceof Error ? err.message : String(err) });
+  }
+  try {
+    await execFileAsync('git', ['branch', '-D', branch], { cwd: repoPath });
+    result.branches.push(branch);
+  } catch (err) {
+    result.failed.push({ target: branch, error: err instanceof Error ? err.message : String(err) });
+  }
+  return result;
+}
+
 export async function cleanTaskWorktrees(options: {
   repoPath: string;
   engineTaskId: string;

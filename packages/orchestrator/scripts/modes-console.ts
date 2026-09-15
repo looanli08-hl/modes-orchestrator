@@ -25,6 +25,7 @@ import { ensureConsoleToken } from '../src/server/consoleToken';
 import { createFilePersistence } from '../src/server/filePersistence';
 import { CONSOLE_REPOS_PATH, createRepoRegistry } from '../src/server/repoRegistry';
 import { createTaskRegistry } from '../src/server/taskRegistry';
+import { CONSOLE_WORKSPACES_PATH, createWorkspaceRegistry } from '../src/server/workspaceRegistry';
 import { mergeLane } from '../src/gate/mergeLane';
 import { recordUserPick } from '../src/gate/recordUserPick';
 import { runBrainstorm } from '../src/patterns/brainstorm';
@@ -35,6 +36,7 @@ import { runTask } from '../src/run/runTask';
 import { runFollowup } from '../src/review/followup';
 import { preferredSecondCli } from '../src/spawn/cliAdapters';
 import { createLaneStreamHub } from '../src/spawn/laneStream';
+import { runWorkspacePrompt } from '../src/workspace/workspaceRun';
 
 const port = Number(process.env.PORT ?? 4177);
 const token = ensureConsoleToken();
@@ -44,6 +46,11 @@ await registry.init();
 
 const repos = createRepoRegistry({ persistence: createFilePersistence(CONSOLE_REPOS_PATH) });
 await repos.init();
+
+// persistent workspaces (the workspace-as-first-class-citizen pivot): named
+// worktrees + continuable sessions, persisted across restarts
+const workspaces = createWorkspaceRegistry({ persistence: createFilePersistence(CONSOLE_WORKSPACES_PATH) });
+await workspaces.init();
 
 // live lane output: one raw-text file per (task, lane), tail-capped at 2 MB;
 // packages/orchestrator/evals/ is gitignored
@@ -75,7 +82,10 @@ const server = createConsoleServer({
   // follow-ups resume the lane's kimi session (or fall back to a fresh kimi)
   // inside the lane's worktree; output streams under the followup-N label
   runFollowup: (opts) => runFollowup(opts),
-}, { registry, repos });
+  // workspace prompt runs: cli -p <text> in the workspace's worktree, resuming
+  // the stored kimi session; output streams under run-N (hub key ws-<id>)
+  runWorkspacePrompt: (opts) => runWorkspacePrompt(opts),
+}, { registry, repos, workspaces });
 
 server.listen(port, '127.0.0.1', () => {
   console.log(`modes console listening at http://127.0.0.1:${port}`);

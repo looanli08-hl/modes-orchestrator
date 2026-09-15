@@ -41,6 +41,13 @@ const CONSOLE_ROUTES = [
   'POST /api/repos',
   'DELETE /api/repos/:path',
   'GET /api/clis',
+  'POST /api/workspaces',
+  'GET /api/workspaces',
+  'GET /api/workspaces/:id',
+  'POST /api/workspaces/:id/prompt',
+  'GET /api/workspaces/:id/events',
+  'GET /api/workspaces/:id/runs/:lane/output',
+  'DELETE /api/workspaces/:id',
 ] as const;
 
 const MODES_RUN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../scripts/modes-run.ts');

@@ -31,9 +31,19 @@ import { dispatchTask } from '../router/dispatchTask';
 import { preferredSecondCli } from '../spawn/cliAdapters';
 import { detectClis as probeClis, type CliAvailability } from '../spawn/detectClis';
 import type { LaneStream, LaneStreamHub } from '../spawn/laneStream';
+import { createWorkspaceWorktree, diffWorkspace, type CreatedWorktree } from '../workspace/createWorkspace';
+import { supportsResume } from '../workspace/sessionHealth';
+import { runWorkspacePrompt, workspaceStreamKey, type WorkspaceRunOptions, type WorkspaceRunResult } from '../workspace/workspaceRun';
 import type { RepoRegistry } from './repoRegistry';
 import { createRepoRegistry } from './repoRegistry';
-import { cleanTaskWorktrees, type WorktreeCleanupResult } from './worktreeCleanup';
+import { cleanTaskWorktrees, removeWorktreeAndBranch, type WorktreeCleanupResult } from './worktreeCleanup';
+import {
+  createWorkspaceRegistry,
+  generateWorkspaceName,
+  WORKSPACE_NAME_PATTERN,
+  type Workspace,
+  type WorkspaceRegistry,
+} from './workspaceRegistry';
 import {
   createTaskRegistry,
   isUserPick,
@@ -165,6 +175,26 @@ export interface ConsoleDeps {
    * answers 501. Real wiring: src/review/followup.ts via scripts/modes-console.ts.
    */
   runFollowup?(options: FollowupEngineOptions): Promise<FollowupEngineResult>;
+  /**
+   * POST /api/workspaces — materialize the workspace's git worktree
+   * (`.modes-workspaces/<name>`, branch `modes-ws/<name>`, .env blind copy).
+   * Injectable for tests; defaults to the real git implementation in
+   * workspace/createWorkspace.ts.
+   */
+  createWorkspaceWorktree?: (options: { repoPath: string; name: string }) => Promise<CreatedWorktree>;
+  /**
+   * POST /api/workspaces/:id/prompt — one prompt run inside the workspace:
+   * `cli -p <text>` with cwd = worktreePath, resuming the stored kimi session
+   * when there is one. Injectable for tests; defaults to
+   * workspace/workspaceRun.ts.
+   */
+  runWorkspacePrompt?: (options: WorkspaceRunOptions) => Promise<WorkspaceRunResult>;
+  /**
+   * DELETE /api/workspaces/:id — remove the worktree and its branch.
+   * Injectable for tests; defaults to removeWorktreeAndBranch in
+   * worktreeCleanup.ts.
+   */
+  cleanWorkspace?: (options: { repoPath: string; worktreePath: string; branch: string }) => Promise<WorktreeCleanupResult>;
 }
 
 export interface FollowupEngineOptions {
@@ -196,6 +226,8 @@ export interface ConsoleServerOptions {
   registry?: TaskRegistry;
   /** registered repos (POST/GET/DELETE /api/repos); defaults to a fresh in-memory one */
   repos?: RepoRegistry;
+  /** persistent workspaces (/api/workspaces/*); defaults to a fresh in-memory one */
+  workspaces?: WorkspaceRegistry;
 }
 
 const BODY_LIMIT_BYTES = 1024 * 1024;
@@ -386,6 +418,58 @@ function handleTaskEvents(
   if (SSE_TERMINAL_STATUSES.has(task.status)) close();
 }
 
+/**
+ * GET /api/workspaces/:id/events — SSE stream of workspace state, same shape
+ * as the task events route: the current state immediately, an event per
+ * registry change, and `event: lane_output` batches carrying live run output
+ * (the hub is keyed by ws-<id>). 'idle' is the terminal state — the stream
+ * closes once a run settles, and a late subscriber to an idle workspace gets
+ * the final state and a clean close.
+ */
+function handleWorkspaceEvents(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  workspaces: WorkspaceRegistry,
+  laneStreams: LaneStreamHub | undefined,
+  workspaceId: string
+): void {
+  const ws = workspaces.get(workspaceId);
+  if (!ws) return sendJson(res, 404, { error: `unknown workspace ${workspaceId}` });
+
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+  });
+
+  const send = (w: Workspace): void => {
+    res.write(`data: ${JSON.stringify({ ...w, runs: w.runs })}\n\n`);
+  };
+  const streamKey = workspaceStreamKey(workspaceId);
+  const unsubscribeOutput = laneStreams?.subscribe(streamKey, (event) => {
+    res.write(`event: lane_output\ndata: ${JSON.stringify({ lane: event.lane, chunk: event.chunk })}\n\n`);
+  });
+  const close = (): void => {
+    // drain buffered lane_output batches first so the terminal close never drops output
+    laneStreams?.flush(streamKey);
+    unsubscribeOutput?.();
+    unsubscribe();
+    res.end();
+  };
+  const unsubscribe = workspaces.subscribe((changed) => {
+    if (changed.id !== workspaceId) return;
+    send(changed);
+    if (changed.status === 'idle') close();
+  });
+  req.on('close', () => {
+    unsubscribe();
+    unsubscribeOutput?.();
+  });
+
+  send(ws);
+  if (ws.status === 'idle') close();
+}
+
 async function readBody(req: http.IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -453,9 +537,15 @@ function taskDetailView(task: ConsoleTask): Record<string, unknown> {
   };
 }
 
+/** Public view of a workspace: the full record — workspaces are the user's own persistent dirs, nothing to hide. */
+function workspaceDetailView(ws: Workspace): Record<string, unknown> {
+  return { ...ws, runs: ws.runs };
+}
+
 export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOptions = {}): http.Server {
   const registry = options.registry ?? createTaskRegistry();
   const repos = options.repos ?? createRepoRegistry();
+  const workspaces = options.workspaces ?? createWorkspaceRegistry();
   const panelPath = options.panelPath ?? PANEL_PATH;
   // probing PATH is not cheap and installs rarely change mid-session; a failed
   // probe is never cached so the next request retries
@@ -638,23 +728,173 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
   };
 
   /**
-   * GET /api/tasks/:id/lanes/:lane/output?offset=N — catch-up read of a lane's
-   * stream file. `offset` is a byte offset from a previous response (default 0);
-   * the response carries the content from there plus the new EOF offset. An
-   * offset past EOF (e.g. after tail truncation) restarts from 0 and reports
-   * `truncated: true` once the file has been capped.
+   * Shared catch-up read behind both output routes
+   * (GET /api/tasks/:id/lanes/:lane/output and
+   * GET /api/workspaces/:id/runs/:lane/output). `offset` is a byte offset from
+   * a previous response (default 0); the response carries the content from
+   * there plus the new EOF offset. An offset past EOF (e.g. after tail
+   * truncation) restarts from 0 and reports `truncated: true` once the file
+   * has been capped.
    */
-  const handleLaneOutput = async (res: http.ServerResponse, taskId: string, lane: string, url: URL): Promise<void> => {
-    if (!deps.laneStreams) return sendJson(res, 404, { error: 'lane streams are not enabled on this console' });
-    const task = registry.get(taskId);
-    if (!task) return sendJson(res, 404, { error: `unknown task ${taskId}` });
+  const serveLaneOutput = async (
+    res: http.ServerResponse,
+    laneStreams: LaneStreamHub,
+    streamKey: string,
+    lane: string,
+    url: URL,
+    ids: Record<string, string>
+  ): Promise<void> => {
     const offsetParam = url.searchParams.get('offset');
     const offset = offsetParam === null ? 0 : Number(offsetParam);
     if (!Number.isFinite(offset) || offset < 0) {
       return sendJson(res, 400, { error: 'offset must be a non-negative byte offset' });
     }
-    const result = await deps.laneStreams.read(taskId, lane, offset);
-    sendJson(res, 200, { taskId, lane, ...result });
+    const result = await laneStreams.read(streamKey, lane, offset);
+    sendJson(res, 200, { ...ids, lane, ...result });
+  };
+
+  /** GET /api/tasks/:id/lanes/:lane/output?offset=N — catch-up read of a lane's stream file */
+  const handleLaneOutput = async (res: http.ServerResponse, taskId: string, lane: string, url: URL): Promise<void> => {
+    if (!deps.laneStreams) return sendJson(res, 404, { error: 'lane streams are not enabled on this console' });
+    const task = registry.get(taskId);
+    if (!task) return sendJson(res, 404, { error: `unknown task ${taskId}` });
+    await serveLaneOutput(res, deps.laneStreams, taskId, lane, url, { taskId });
+  };
+
+  /**
+   * POST /api/workspaces — create a named persistent workspace: validate the
+   * repo, `git worktree add .modes-workspaces/<name> -b modes-ws/<name>`,
+   * record the current HEAD as baseRef, blind-copy a root `.env` into the
+   * worktree. No name given → the generator picks one (`brisk-otter`).
+   */
+  const handleCreateWorkspace = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    let body: unknown;
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch {
+      return sendJson(res, 400, { error: 'invalid JSON body' });
+    }
+    const { repoPath, name, cli } = (body ?? {}) as Record<string, unknown>;
+    if (typeof repoPath !== 'string' || !repoPath.trim()) {
+      return sendJson(res, 400, { error: 'repoPath must be a non-empty string' });
+    }
+    if (name !== undefined && (typeof name !== 'string' || !WORKSPACE_NAME_PATTERN.test(name))) {
+      return sendJson(res, 400, { error: 'name must match /^[a-z0-9][a-z0-9-]{0,39}$/ (it becomes a path segment and a branch suffix)' });
+    }
+    if (cli !== undefined && (typeof cli !== 'string' || !cli.trim())) {
+      return sendJson(res, 400, { error: 'cli must be a non-empty string' });
+    }
+    const resolvedRepoPath = path.resolve(repoPath);
+    const taken = workspaces.takenNames();
+    const wsName = (name as string | undefined) ?? generateWorkspaceName(taken);
+    if (taken.has(wsName)) {
+      return sendJson(res, 409, { error: `workspace name "${wsName}" is already taken` });
+    }
+    try {
+      const create = deps.createWorkspaceWorktree ?? createWorkspaceWorktree;
+      const worktree = await create({ repoPath: resolvedRepoPath, name: wsName });
+      const workspace = workspaces.create({
+        name: wsName,
+        repoPath: resolvedRepoPath,
+        worktreePath: worktree.worktreePath,
+        branch: worktree.branch,
+        cli: (cli as string | undefined) ?? 'kimi',
+        baseRef: worktree.baseRef,
+      });
+      sendJson(res, 201, workspaceDetailView(workspace));
+    } catch (err) {
+      sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  /**
+   * GET /api/workspaces/:id — the workspace record plus its diff vs baseRef:
+   * `committed` is `git diff baseRef...HEAD` (what the runs committed),
+   * `uncommitted` is the worktree's uncommitted state incl. untracked files.
+   */
+  const handleGetWorkspace = async (res: http.ServerResponse, workspaceId: string): Promise<void> => {
+    const ws = workspaces.get(workspaceId);
+    if (!ws) return sendJson(res, 404, { error: `unknown workspace ${workspaceId}` });
+    const diff = await diffWorkspace(ws.worktreePath, ws.baseRef);
+    sendJson(res, 200, { ...workspaceDetailView(ws), diff });
+  };
+
+  /**
+   * POST /api/workspaces/:id/prompt — the core move: send a prompt to the
+   * workspace's agent. HARD busy lock (409 while running): two concurrent
+   * resumes of one session corrupt the CLI's session record (feasibility §五
+   * 修正 #1). The run spawns with cwd = the workspace's worktree, resumes the
+   * stored kimi session when there is one, streams under run-N, and on
+   * completion stores the parsed session id back — flagged sessionRenewed
+   * when the CLI silently replaced a dead session.
+   */
+  const handleWorkspacePrompt = async (req: http.IncomingMessage, res: http.ServerResponse, workspaceId: string): Promise<void> => {
+    const ws = workspaces.get(workspaceId);
+    if (!ws) return sendJson(res, 404, { error: `unknown workspace ${workspaceId}` });
+    if (ws.status === 'running') {
+      return sendJson(res, 409, { error: `workspace ${workspaceId} is running — concurrent resumes would corrupt the session` });
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch {
+      return sendJson(res, 400, { error: 'invalid JSON body' });
+    }
+    const { text } = (body ?? {}) as Record<string, unknown>;
+    if (typeof text !== 'string' || !text.trim()) {
+      return sendJson(res, 400, { error: 'text must be a non-empty string' });
+    }
+    const sessionIdAtSpawn = ws.sessionId;
+    const lane = workspaces.beginRun(ws.id, text);
+    const stream = deps.laneStreams ? deps.laneStreams.bind(workspaceStreamKey(ws.id)) : undefined;
+    const run = deps.runWorkspacePrompt ?? runWorkspacePrompt;
+    run({
+      workspaceId: ws.id,
+      repoPath: ws.repoPath,
+      worktreePath: ws.worktreePath,
+      cli: ws.cli,
+      prompt: text,
+      sessionId: sessionIdAtSpawn,
+      laneLabel: lane,
+      eventsFile: path.join(ws.repoPath, '.modes', 'events.jsonl'),
+      stream,
+    })
+      .then((result) => workspaces.completeRun(ws.id, result))
+      .catch(() => workspaces.failRun(ws.id));
+    sendJson(res, 202, { id: ws.id, lane, sessionId: sessionIdAtSpawn, resumed: sessionIdAtSpawn !== null && supportsResume(ws.cli) });
+  };
+
+  /**
+   * GET /api/workspaces/:id/runs/:lane/output?offset=N — catch-up read of a
+   * run's stream file (same contract as the task lane output route; the
+   * stream key is ws-<id>).
+   */
+  const handleWorkspaceRunOutput = async (res: http.ServerResponse, workspaceId: string, lane: string, url: URL): Promise<void> => {
+    if (!deps.laneStreams) return sendJson(res, 404, { error: 'lane streams are not enabled on this console' });
+    const ws = workspaces.get(workspaceId);
+    if (!ws) return sendJson(res, 404, { error: `unknown workspace ${workspaceId}` });
+    await serveLaneOutput(res, deps.laneStreams, workspaceStreamKey(workspaceId), lane, url, { workspaceId });
+  };
+
+  /**
+   * DELETE /api/workspaces/:id — tear the workspace down: 409 while a run is
+   * live, else `git worktree remove --force` + `git branch -D`, then the
+   * record is unregistered. A half-failed cleanup keeps the record (and
+   * reports the failures) so the delete can be retried.
+   */
+  const handleDeleteWorkspace = async (res: http.ServerResponse, workspaceId: string): Promise<void> => {
+    const ws = workspaces.get(workspaceId);
+    if (!ws) return sendJson(res, 404, { error: `unknown workspace ${workspaceId}` });
+    if (ws.status === 'running') {
+      return sendJson(res, 409, { error: `workspace ${workspaceId} is running — its agent may still be live` });
+    }
+    const clean = deps.cleanWorkspace ?? removeWorktreeAndBranch;
+    const result = await clean({ repoPath: ws.repoPath, worktreePath: ws.worktreePath, branch: ws.branch });
+    if (result.failed.length > 0) {
+      return sendJson(res, 500, { error: 'cleanup failed — the workspace record is kept so the delete can be retried', ...result });
+    }
+    workspaces.remove(ws.id);
+    sendJson(res, 200, { id: ws.id, ...result });
   };
 
   const handleCreateRepo = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
@@ -823,6 +1063,10 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     const worktreesMatch = /^\/api\/tasks\/([^/]+)\/worktrees$/.exec(url.pathname);
     const repoMatch = /^\/api\/repos\/([^/]+)$/.exec(url.pathname);
     const taskMatch = /^\/api\/tasks\/([^/]+)$/.exec(url.pathname);
+    const workspacePromptMatch = /^\/api\/workspaces\/([^/]+)\/prompt$/.exec(url.pathname);
+    const workspaceEventsMatch = /^\/api\/workspaces\/([^/]+)\/events$/.exec(url.pathname);
+    const workspaceRunOutputMatch = /^\/api\/workspaces\/([^/]+)\/runs\/([^/]+)\/output$/.exec(url.pathname);
+    const workspaceMatch = /^\/api\/workspaces\/([^/]+)$/.exec(url.pathname);
 
     try {
       // public liveness probe (used by the extension's activate.js)
@@ -832,9 +1076,9 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
       if (req.method === 'GET' && url.pathname === '/api/agent-context') return sendJson(res, 200, buildAgentContext());
 
       if (deps.token && url.pathname.startsWith('/api/')) {
-        // EventSource cannot set headers, so the SSE route also honors ?token=
+        // EventSource cannot set headers, so the SSE routes also honor ?token=
         const presented =
-          req.headers['x-modes-token'] ?? (eventsMatch ? url.searchParams.get('token') : null);
+          req.headers['x-modes-token'] ?? (eventsMatch || workspaceEventsMatch ? url.searchParams.get('token') : null);
         if (presented !== deps.token) {
           return sendJson(res, 401, { error: 'unauthorized: missing or wrong x-modes-token header' });
         }
@@ -882,6 +1126,28 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
       if (req.method === 'POST' && followupMatch) return await handleFollowup(req, res, decodeURIComponent(followupMatch[1]));
       if (req.method === 'POST' && annotationsMatch) {
         return await handleSetAnnotations(req, res, decodeURIComponent(annotationsMatch[1]));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/workspaces') return sendJson(res, 200, workspaces.list());
+      if (req.method === 'POST' && url.pathname === '/api/workspaces') return await handleCreateWorkspace(req, res);
+      if (req.method === 'GET' && workspaceEventsMatch) {
+        return handleWorkspaceEvents(req, res, workspaces, deps.laneStreams, decodeURIComponent(workspaceEventsMatch[1]));
+      }
+      if (req.method === 'GET' && workspaceRunOutputMatch) {
+        return await handleWorkspaceRunOutput(
+          res,
+          decodeURIComponent(workspaceRunOutputMatch[1]),
+          decodeURIComponent(workspaceRunOutputMatch[2]),
+          url
+        );
+      }
+      if (req.method === 'POST' && workspacePromptMatch) {
+        return await handleWorkspacePrompt(req, res, decodeURIComponent(workspacePromptMatch[1]));
+      }
+      if (req.method === 'GET' && workspaceMatch) {
+        return await handleGetWorkspace(res, decodeURIComponent(workspaceMatch[1]));
+      }
+      if (req.method === 'DELETE' && workspaceMatch) {
+        return await handleDeleteWorkspace(res, decodeURIComponent(workspaceMatch[1]));
       }
       sendJson(res, 404, { error: 'not found' });
     } catch (err) {
