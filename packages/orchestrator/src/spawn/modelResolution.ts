@@ -17,6 +17,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 
+import { DEEPSEEK_MODEL } from './cliAdapters';
+
+/** lanes whose model is fixed by our adapter flags, not a user config file */
+const STATIC_MODELS: Record<string, string> = { deepseek: DEEPSEEK_MODEL };
+
 interface ModelSource {
   configPath: (homedir: string) => string;
   extract: (content: string) => string | null;
@@ -41,9 +46,9 @@ export function resolveModelId(cli: string, opts?: { homedir?: string }): string
   const hit = cache.get(cacheKey);
   if (hit !== undefined) return hit;
 
-  let model = 'unknown';
+  let model = STATIC_MODELS[cli] ?? 'unknown';
   const source = MODEL_SOURCES[cli];
-  if (source) {
+  if (!STATIC_MODELS[cli] && source) {
     try {
       model = source.extract(readFileSync(source.configPath(homedir), 'utf8')) ?? 'unknown';
     } catch {

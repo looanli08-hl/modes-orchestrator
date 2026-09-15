@@ -12,6 +12,8 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { resolveCliBinary } from './cliAdapters';
+
 const execFileAsync = promisify(execFile);
 
 // port-spec §7 item 4: the prompt travels via argv, so the limit derives from the OS
@@ -82,12 +84,12 @@ export async function spawnWorker(options: SpawnWorkerOptions): Promise<SpawnWor
     };
   }
 
-  if (!(await binaryExists(options.cli))) {
+  if (!(await binaryExists(resolveCliBinary(options.cli)))) {
     return {
       ok: false,
       error: {
         code: 'cli_not_found',
-        message: `CLI binary "${options.cli}" was not found on PATH`,
+        message: `CLI binary "${resolveCliBinary(options.cli)}" was not found on PATH`,
         nextSteps: [`Install "${options.cli}" and re-run its login flow`, 'Pick another CLI lane'],
       },
     };
@@ -98,6 +100,6 @@ export async function spawnWorker(options: SpawnWorkerOptions): Promise<SpawnWor
     cwd: options.repoPath,
   });
 
-  const child = spawn(options.cli, ['-p', options.prompt], { cwd: worktreePath });
+  const child = spawn(resolveCliBinary(options.cli), ['-p', options.prompt], { cwd: worktreePath });
   return { ok: true, worktreePath, process: child };
 }

@@ -69,7 +69,7 @@ export const CLI_SPECS: CliCommandSpec[] = [
     positionalArgs: RUN_POSITIONALS,
     examples: ['bun packages/orchestrator/scripts/modes-run.ts --mode compete "add a retry to the fetch wrapper" ~/code/myrepo'],
     notes: [
-      'Default mode when --mode is omitted. Lanes: kimi (A) + qwen (B), reviewer kimi.',
+      'Default mode when --mode is omitted. Lanes: kimi (A) + deepseek (B) — qwen when no DeepSeek key is configured — reviewer kimi.',
       'The pick gate is interactive (Pick A / B / neither?); pipe an answer on stdin to script it.',
       ...RUN_NOTES,
     ],

@@ -4,11 +4,16 @@
  * Detection is a PATH lookup only (same check spawnWorker.ts does before
  * spawning): running `--version` would be slower and risks side effects
  * (login prompts, update checks) from CLIs we do not control.
+ * deepseek is available when its API key is configured AND the qwen binary it
+ * rides is on PATH (cliAdapters.ts resolveCliBinary).
  */
 
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
+
+import { resolveCliBinary } from './cliAdapters';
+import { getDeepseekApiKey } from './secrets';
 
 export interface CliAvailability {
   name: string;
@@ -16,7 +21,17 @@ export interface CliAvailability {
 }
 
 /** CLIs the panel offers as chips, in display order */
-export const KNOWN_CLIS = ['kimi', 'qwen', 'iflow', 'claude', 'codex'];
+export const KNOWN_CLIS = ['kimi', 'qwen', 'iflow', 'claude', 'codex', 'deepseek'];
+
+/** lanes that need a key on top of a binary: deepseek needs its API key, the rest need nothing */
+function defaultHasCredentials(name: string): boolean {
+  return name !== 'deepseek' || getDeepseekApiKey() !== null;
+}
+
+export interface DetectClisOptions {
+  /** injectable for tests; defaults to defaultHasCredentials */
+  hasCredentials?: (name: string) => boolean;
+}
 
 /** true when `bin` resolves to an executable file on PATH */
 export async function binaryOnPath(bin: string): Promise<boolean> {
@@ -34,6 +49,12 @@ export async function binaryOnPath(bin: string): Promise<boolean> {
   return (await Promise.all(checks)).some(Boolean);
 }
 
-export async function detectClis(candidates: string[] = KNOWN_CLIS): Promise<CliAvailability[]> {
-  return Promise.all(candidates.map(async (name) => ({ name, available: await binaryOnPath(name) })));
+export async function detectClis(candidates: string[] = KNOWN_CLIS, opts?: DetectClisOptions): Promise<CliAvailability[]> {
+  const hasCredentials = opts?.hasCredentials ?? defaultHasCredentials;
+  return Promise.all(
+    candidates.map(async (name) => ({
+      name,
+      available: (await binaryOnPath(resolveCliBinary(name))) && hasCredentials(name),
+    }))
+  );
 }

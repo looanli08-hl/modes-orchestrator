@@ -4,9 +4,10 @@
  * Usage:  bun packages/orchestrator/scripts/modes-console.ts
  *         PORT=4180 bun ...   (default port 4177)
  * Then open the printed URL. The panel's CLI chips pick which CLIs sit at the
- * table (default kimi + qwen, kimi as reviewer/synthesizer, same as
- * modes-run.ts); the cascade chain defaults to qwen → kimi (cheap first),
- * overridable per request. Task history is persisted to
+ * table (default kimi + deepseek — qwen when no DeepSeek key is configured,
+ * kimi as reviewer/synthesizer, same as modes-run.ts); the cascade chain
+ * defaults to qwen → kimi (cheap first), overridable per request. Task history
+ * is persisted to
  * packages/orchestrator/.modes-console-tasks.json (gitignored) and reloaded on
  * start; tasks caught mid-run by a restart are marked failed. The JSONL event
  * log on disk remains the durable record of the runs themselves.
@@ -32,6 +33,7 @@ import { runSingle } from '../src/patterns/single';
 import { runTask } from '../src/run/runTask';
 import { runFollowup } from '../src/review/followup';
 import { createLaneStreamHub } from '../src/spawn/laneStream';
+import { getDeepseekApiKey } from '../src/spawn/secrets';
 
 const port = Number(process.env.PORT ?? 4177);
 const token = ensureConsoleToken();
@@ -50,7 +52,8 @@ const laneStreams = createLaneStreamHub({
 
 const LANES = [
   { lane: 'A', cli: 'kimi' },
-  { lane: 'B', cli: 'qwen' },
+  // deepseek when a key is configured (qwen's account is broken) — see modes-run.ts SECOND_CLI
+  { lane: 'B', cli: getDeepseekApiKey() ? 'deepseek' : 'qwen' },
 ];
 
 const server = createConsoleServer({

@@ -158,6 +158,7 @@ function makeFakeDeps() {
       { name: 'kimi', available: true },
       { name: 'qwen', available: true },
       { name: 'iflow', available: false },
+      { name: 'deepseek', available: true },
     ]),
     recordPick: vi.fn(async () => {}),
     mergeLane: vi.fn(async () => {}),
@@ -857,6 +858,7 @@ describe('GET /api/clis', () => {
       { name: 'kimi', available: true },
       { name: 'qwen', available: true },
       { name: 'iflow', available: false },
+      { name: 'deepseek', available: true },
     ]);
   });
 

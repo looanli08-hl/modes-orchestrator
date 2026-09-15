@@ -738,7 +738,7 @@ const TERMINAL_STATUSES = new Set(["awaiting_pick", "done", "failed"]);
 // comes from GET /api/clis (server probes PATH); unavailable CLIs render grey.
 // Nothing lit by default: an empty selection means "团队：自动搭配" — the
 // dispatcher picks the team (no clis field is sent, same as before).
-const FALLBACK_CLIS = ["kimi", "qwen", "iflow", "claude", "codex"].map((name) => ({ name, available: true }));
+const FALLBACK_CLIS = ["kimi", "qwen", "iflow", "claude", "codex", "deepseek"].map((name) => ({ name, available: true }));
 
 const state = {
   mode: "auto",

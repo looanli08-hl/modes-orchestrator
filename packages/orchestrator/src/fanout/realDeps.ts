@@ -13,6 +13,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { LaneStream } from '../spawn/laneStream';
+import { resolveCliBinary } from '../spawn/cliAdapters';
 import type { FanOutDeps, SpawnedProcessResult } from './fanOut';
 
 const execFileAsync = promisify(execFile);
@@ -47,7 +48,9 @@ export function makeRealDeps(repoPath: string, options: RealDepsOptions): FanOut
         // spawns the real CLI as a grandchild) survive a plain child.kill: the
         // grandchild keeps running and holds the stdio pipes, so 'close' never
         // fires and the lane hangs forever (observed 2026-09-14, qwen 429 storm).
-        const child = spawn(cli, args, { cwd: opts.cwd, detached: process.platform !== 'win32' });
+        // the lane's cli name maps to its binary here (deepseek → qwen); the
+        // lane/stream labels keep the cli name for observability
+        const child = spawn(resolveCliBinary(cli), args, { cwd: opts.cwd, detached: process.platform !== 'win32' });
         let stdout = '';
         let stderr = '';
         let timedOut = false;

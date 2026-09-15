@@ -28,6 +28,15 @@ import { runRoundtable, type RoundtableResult } from '../src/patterns/roundtable
 import { runSingle, type SingleResult } from '../src/patterns/single';
 import { runRouted } from '../src/router/runRouted';
 import { runTask, type RunTaskResult } from '../src/run/runTask';
+import { getDeepseekApiKey } from '../src/spawn/secrets';
+
+/**
+ * Lane B of the default compete table. qwen's own account is broken (ModelScope
+ * 400, 2026-09), so the working second lane is deepseek — the qwen binary pointed
+ * at DeepSeek's OpenAI-compatible endpoint (cliAdapters.ts). With no DeepSeek key
+ * configured it falls back to qwen. To pin qwen regardless, set this to 'qwen'.
+ */
+const SECOND_CLI = getDeepseekApiKey() ? 'deepseek' : 'qwen';
 
 function presentBrainstormResult(result: BrainstormResult): void {
   for (const lane of result.lanes) {
@@ -277,14 +286,14 @@ if (mode === 'cascade') {
 
 console.log(`repo: ${repoPath}`);
 console.log(`prompt: ${prompt}`);
-console.log('fanning out to kimi + qwen …\n');
+console.log(`fanning out to kimi + ${SECOND_CLI} …\n`);
 
 const result = await runTask({
   repoPath,
   prompt,
   lanes: [
     { lane: 'A', cli: 'kimi' },
-    { lane: 'B', cli: 'qwen' },
+    { lane: 'B', cli: SECOND_CLI },
   ],
   reviewerCli: 'kimi',
 });
