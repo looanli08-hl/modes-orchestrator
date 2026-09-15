@@ -247,3 +247,11 @@ bun run dev
 
 - [x] ModesPage 从 useThemeContext 取壳主题，iframe src 拼 `?theme=dark|light`（useMemo 稳定 src，切主题重载一次）；面板首绘前内联脚本读 URL 参数写 `data-theme`，属性选择器优先级高于 prefers-color-scheme（standalone 无参数行为不变）；ExtensionSettingsPage 是上游统一组件故意不改（入册注明）
 - [x] Playwright 反向 media 验证：参数两个方向都赢过 media query；419 全绿
+
+## Day 4 — 方向重排：工作区底座（手动先行，编排降级为加速器）
+
+- [x] **可行性联网验证**（/tmp/workspace-model-feasibility.md）：持久工作区模型被市场强烈验证（Orca/Conductor/Nimbalyst 全是），一次性任务独立产品全灭（Terragon/Vibe Kanban）；三个修正内建：session 健康层、环境治理、编排可降级
+- [x] **工作区后端**：workspaceRegistry（busy 硬锁防并发写坏 session）+ createWorkspace（命名生成器"形容词+海洋动物"、baseRef 记录、.env 盲拷环境治理）+ sessionHealth（kimi 静默新会话检测 → sessionRenewed 打标不静默）+ workspaceRun（cwd 锁定、resume、JSONL 生命周期）；7 端点 + SSE/补读复用任务的公共函数
+- [x] **工作区面板**：左栏 Workspaces 区块（栏内创建表单）+ 工作区视图（Changes 折叠 diff + 会话时间线 run-1/run-2… + 底部 sticky 输入框反复派活 + running 禁用态）；直播逻辑 ctx 参数化，任务/工作区共用
+- [x] 真实冒烟：clever-manatee 工作区两轮 prompt 同一 session resume、Changes diff 正确
+- 测试 419 → 446 全绿
