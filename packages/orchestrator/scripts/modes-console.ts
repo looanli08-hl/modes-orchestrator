@@ -30,6 +30,7 @@ import { runCascade } from '../src/patterns/cascade';
 import { runRoundtable } from '../src/patterns/roundtable';
 import { runSingle } from '../src/patterns/single';
 import { runTask } from '../src/run/runTask';
+import { runFollowup } from '../src/review/followup';
 import { createLaneStreamHub } from '../src/spawn/laneStream';
 
 const port = Number(process.env.PORT ?? 4177);
@@ -67,6 +68,9 @@ const server = createConsoleServer({
   // auto uses the server's default: the AI dispatcher (kimi call + rule fallback)
   recordPick: (eventsFile, opts) => recordUserPick(eventsFile, opts),
   mergeLane: (opts) => mergeLane(opts),
+  // follow-ups resume the lane's kimi session (or fall back to a fresh kimi)
+  // inside the lane's worktree; output streams under the followup-N label
+  runFollowup: (opts) => runFollowup(opts),
 }, { registry, repos });
 
 server.listen(port, '127.0.0.1', () => {

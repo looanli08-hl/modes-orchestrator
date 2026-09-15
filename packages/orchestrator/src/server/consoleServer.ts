@@ -13,13 +13,15 @@
  * CORS, is the access control. GET /api/health is public for liveness probes.
  */
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { UserPick } from '../gate/userGate';
 import type { CascadeLevel } from '../patterns/cascade';
+import { formatDiffComments, type AnnotateComment } from '../review/annotate';
+import { parseKimiSessionId } from '../review/followup';
 import type { ReviewVerdict } from '../review/crossReview';
 import type { TaskClassification } from '../router/classifyTask';
 import { dispatchTask } from '../router/dispatchTask';
@@ -39,6 +41,7 @@ import {
   type ConsoleTaskMode,
   type RoundtableRoundState,
   type SingleLaneState,
+  type TaskAnnotation,
   type TaskRegistry,
 } from './taskRegistry';
 
@@ -149,6 +152,36 @@ export interface ConsoleDeps {
     options: { taskId: string; pick: UserPick; reviewVerdict: ReviewVerdict['verdict'] | null }
   ): Promise<void>;
   mergeLane(options: { repoPath: string; worktreePath: string; branch: string; taskId: string; pick: string }): Promise<void>;
+  /**
+   * POST /api/tasks/:id/followup — continue a finished lane with the human's
+   * diff notes. The implementation resumes the lane's kimi session when the
+   * stream yielded one, else spawns a fresh kimi with task+diff+notes; output
+   * streams under the given followup-N label. Optional: without it the route
+   * answers 501. Real wiring: src/review/followup.ts via scripts/modes-console.ts.
+   */
+  runFollowup?(options: FollowupEngineOptions): Promise<FollowupEngineResult>;
+}
+
+export interface FollowupEngineOptions {
+  engineTaskId: string;
+  repoPath: string;
+  /** the lane's worktree — the follow-up runs inside it */
+  worktreePath: string;
+  /** final agent prompt (resume: notes only; fallback: task + diff + notes) */
+  prompt: string;
+  /** resumable kimi session parsed from the lane's stream, or null (fallback) */
+  sessionId: string | null;
+  /** live-output label: followup-1, followup-2… */
+  laneLabel: string;
+  eventsFile: string;
+  stream?: LaneStream;
+}
+
+export interface FollowupEngineResult {
+  outcome: string;
+  summary: string;
+  /** worktree diff vs HEAD after the follow-up; '' on failure */
+  diff: string;
 }
 
 export interface ConsoleServerOptions {
@@ -195,6 +228,59 @@ function isCascadeChain(value: unknown): value is CascadeLevel[] {
         ((entry as CascadeLevel).timeoutMs === undefined || typeof (entry as CascadeLevel).timeoutMs === 'number')
     )
   );
+}
+
+/** a follow-up note: {path?, line?, body} — plain text bodies are wrapped by the caller */
+interface FollowupNote {
+  path?: string;
+  line?: number;
+  body: string;
+}
+
+function isFollowupNoteList(value: unknown): value is FollowupNote[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (n) =>
+        typeof n === 'object' &&
+        n !== null &&
+        typeof (n as FollowupNote).body === 'string' &&
+        (n as FollowupNote).body.trim() !== '' &&
+        ((n as FollowupNote).path === undefined || typeof (n as FollowupNote).path === 'string') &&
+        ((n as FollowupNote).line === undefined || typeof (n as FollowupNote).line === 'number')
+    )
+  );
+}
+
+/** panel annotations round-trip whole-list; every entry needs id + lane + body */
+function isAnnotationList(value: unknown): value is TaskAnnotation[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (a) =>
+        typeof a === 'object' &&
+        a !== null &&
+        typeof (a as TaskAnnotation).id === 'string' &&
+        typeof (a as TaskAnnotation).lane === 'string' &&
+        typeof (a as TaskAnnotation).body === 'string' &&
+        (a as TaskAnnotation).body.trim() !== '' &&
+        ((a as TaskAnnotation).path === undefined || typeof (a as TaskAnnotation).path === 'string') &&
+        ((a as TaskAnnotation).line === undefined || typeof (a as TaskAnnotation).line === 'number')
+    )
+  );
+}
+
+/** the lane's pick-time pointer, per mode; cascade exposes only its winner */
+function followupLaneState(task: ConsoleTask, lane: string): { worktreePath: string; diff: string } | null {
+  if (task.mode === 'compete' && task.compete) {
+    return task.compete.lanes.find((l) => l.lane === lane) ?? null;
+  }
+  if (task.mode === 'single' && task.single && lane === 'single') return task.single.lane;
+  if (task.mode === 'cascade' && task.cascade?.winner && lane === `cascade-${task.cascade.winner.level}`) {
+    return task.cascade.winner;
+  }
+  return null;
 }
 
 // Anchor inside panel/index.html before which the token is injected when the
@@ -318,6 +404,7 @@ function taskDetailView(task: ConsoleTask): Record<string, unknown> {
     status: task.status,
     createdAt: task.createdAt,
     error: task.error,
+    annotations: task.annotations ?? [],
   };
   if (task.mode === 'compete') {
     return {
@@ -604,6 +691,108 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
     sendJson(res, 200, { taskId: task.id, engineTaskId: task.engineTaskId, ...result });
   };
 
+  /** POST /api/tasks/:id/annotations — replace the task's review notes (whole-list write) */
+  const handleSetAnnotations = async (req: http.IncomingMessage, res: http.ServerResponse, taskId: string): Promise<void> => {
+    const task = registry.get(taskId);
+    if (!task) return sendJson(res, 404, { error: `unknown task ${taskId}` });
+    let body: unknown;
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch {
+      return sendJson(res, 400, { error: 'invalid JSON body' });
+    }
+    const { annotations } = (body ?? {}) as Record<string, unknown>;
+    if (!isAnnotationList(annotations)) {
+      return sendJson(res, 400, { error: 'annotations must be an array of { id, lane, path?, line?, body }' });
+    }
+    for (const a of annotations) a.createdAt ||= new Date().toISOString();
+    registry.setAnnotations(task.id, annotations);
+    sendJson(res, 200, taskDetailView(registry.get(task.id) as ConsoleTask));
+  };
+
+  /**
+   * POST /api/tasks/:id/followup — send a lane's diff notes back to its agent.
+   * Body: { lane, notes } — notes is [{ path?, line?, body }] or a plain string.
+   * The lane's kimi session (last `kimi -r session_*` in its stream) is resumed
+   * when found; otherwise a fresh kimi gets the original task + current diff +
+   * formatted notes. The task goes back to running, streams under followup-N,
+   * and returns to awaiting_pick with the recomputed worktree diff.
+   */
+  const handleFollowup = async (req: http.IncomingMessage, res: http.ServerResponse, taskId: string): Promise<void> => {
+    const task = registry.get(taskId);
+    if (!task) return sendJson(res, 404, { error: `unknown task ${taskId}` });
+    if (!deps.runFollowup) return sendJson(res, 501, { error: 'follow-ups are not enabled on this console' });
+
+    let body: unknown;
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch {
+      return sendJson(res, 400, { error: 'invalid JSON body' });
+    }
+    const { lane, notes } = (body ?? {}) as Record<string, unknown>;
+    if (typeof lane !== 'string' || !lane.trim()) {
+      return sendJson(res, 400, { error: 'lane must be a non-empty string' });
+    }
+    // plain text is one file-scope note; the array form carries line anchors
+    const noteList: unknown = typeof notes === 'string' && notes.trim() ? [{ body: notes }] : notes;
+    if (!isFollowupNoteList(noteList)) {
+      return sendJson(res, 400, { error: 'notes must be a non-empty string or an array of { path?, line?, body }' });
+    }
+    if (task.status === 'running') {
+      return sendJson(res, 409, { error: `task ${taskId} is still running — wait for it to settle` });
+    }
+    if (!task.engineTaskId || !task.eventsFile) {
+      return sendJson(res, 409, { error: `task ${taskId} never reached the engine — nothing to follow up on` });
+    }
+    const laneState = followupLaneState(task, lane);
+    if (!laneState) {
+      return sendJson(res, 404, { error: `unknown lane ${lane} for task ${taskId}` });
+    }
+    try {
+      await stat(laneState.worktreePath);
+    } catch {
+      return sendJson(res, 409, { error: `lane ${lane} 的 worktree 已清理，无法追问` });
+    }
+
+    // resume the same agent session when the lane's stream hands us one
+    let sessionId: string | null = null;
+    if (deps.laneStreams) {
+      const streamText = (await deps.laneStreams.read(task.id, lane, 0)).content;
+      sessionId = parseKimiSessionId(streamText);
+    }
+    const formatted = formatDiffComments(
+      noteList.map((n): AnnotateComment => ({ filePath: n.path ?? '(file)', lineNumber: n.line ?? 0, body: n.body }))
+    );
+    const prompt = sessionId
+      ? `The human reviewed your diff and left these notes. Address them, then stop.\n\n${formatted}`
+      : [
+          `Original task: ${task.prompt}`,
+          '',
+          `Current diff of the lane's worktree:`,
+          laneState.diff || '(no changes)',
+          '',
+          'Review notes from the human:',
+          formatted,
+        ].join('\n');
+
+    const followups = registry.beginFollowup(task.id);
+    const laneLabel = `followup-${followups}`;
+    const stream = deps.laneStreams ? deps.laneStreams.bind(task.id) : undefined;
+    deps.runFollowup({
+      engineTaskId: task.engineTaskId,
+      repoPath: task.repoPath,
+      worktreePath: laneState.worktreePath,
+      prompt,
+      sessionId,
+      laneLabel,
+      eventsFile: task.eventsFile,
+      stream,
+    })
+      .then((result) => registry.completeFollowup(task.id, lane, result))
+      .catch((err) => registry.failFollowup(task.id, err));
+    sendJson(res, 202, { id: task.id, followupLane: laneLabel, sessionId, fallback: sessionId === null });
+  };
+
   return http.createServer(async (req, res) => {
     // Permissive CORS on every response: the AionUi-embedded panel is served
     // from aioncore's origin and calls this server cross-origin. Safe here
@@ -622,6 +811,8 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
 
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const pickMatch = /^\/api\/tasks\/([^/]+)\/pick$/.exec(url.pathname);
+    const followupMatch = /^\/api\/tasks\/([^/]+)\/followup$/.exec(url.pathname);
+    const annotationsMatch = /^\/api\/tasks\/([^/]+)\/annotations$/.exec(url.pathname);
     const eventsMatch = /^\/api\/tasks\/([^/]+)\/events$/.exec(url.pathname);
     const laneOutputMatch = /^\/api\/tasks\/([^/]+)\/lanes\/([^/]+)\/output$/.exec(url.pathname);
     const worktreesMatch = /^\/api\/tasks\/([^/]+)\/worktrees$/.exec(url.pathname);
@@ -680,6 +871,10 @@ export function createConsoleServer(deps: ConsoleDeps, options: ConsoleServerOpt
         return sendJson(res, 200, { removed });
       }
       if (req.method === 'POST' && pickMatch) return await handlePick(req, res, decodeURIComponent(pickMatch[1]));
+      if (req.method === 'POST' && followupMatch) return await handleFollowup(req, res, decodeURIComponent(followupMatch[1]));
+      if (req.method === 'POST' && annotationsMatch) {
+        return await handleSetAnnotations(req, res, decodeURIComponent(annotationsMatch[1]));
+      }
       sendJson(res, 404, { error: 'not found' });
     } catch (err) {
       sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });

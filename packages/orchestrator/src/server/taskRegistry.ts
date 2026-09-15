@@ -73,6 +73,17 @@ export interface SingleLaneState {
   branch: string;
 }
 
+/** a review note pinned to a lane's diff line; persisted on the task */
+export interface TaskAnnotation {
+  id: string;
+  lane: string;
+  path?: string;
+  /** new-side line number; 0/absent = file scope */
+  line?: number;
+  body: string;
+  createdAt: string;
+}
+
 export interface ConsoleTask {
   /** console-assigned id — the engine only hands back its taskId when the run finishes */
   id: string;
@@ -92,6 +103,10 @@ export interface ConsoleTask {
   cascade: { attempts: CascadeAttemptState[]; winner: CascadeWinnerState | null } | null;
   roundtable: { rounds: RoundtableRoundState[]; consensus: boolean; synthesis: string | null } | null;
   single: { lane: SingleLaneState } | null;
+  /** diff review notes left in the panel; sent to the lane's agent on follow-up */
+  annotations: TaskAnnotation[];
+  /** how many follow-up runs this task has had (labels them followup-N) */
+  followups: number;
 }
 
 export interface ConsoleTaskSummary {
@@ -144,6 +159,14 @@ export interface TaskRegistry {
   markDone(id: string): void;
   /** pick application failed — task stays awaiting_pick so the human can retry */
   setError(id: string, error: unknown): void;
+  /** replace the task's annotation list (panel edits arrive as whole-list writes) */
+  setAnnotations(id: string, annotations: TaskAnnotation[]): void;
+  /** follow-up started: back to running; returns the follow-up number (followup-N) */
+  beginFollowup(id: string): number;
+  /** follow-up finished: lane summary/diff updated (on success), back to awaiting_pick */
+  completeFollowup(id: string, lane: string, result: { outcome: string; summary: string; diff: string }): void;
+  /** follow-up run threw — back to awaiting_pick with the error surfaced */
+  failFollowup(id: string, error: unknown): void;
   /**
    * Subscribe to state changes; the listener receives the changed task after
    * every mutation. Returns an unsubscribe function. Used by the console's SSE
@@ -236,6 +259,9 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
           raw.status = 'failed';
           raw.error = 'server restarted while task was running';
         }
+        // records written before annotations/followups existed get the defaults
+        raw.annotations ??= [];
+        raw.followups ??= 0;
         tasks.set(raw.id, raw);
         restored += 1;
       }
@@ -259,6 +285,8 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
         cascade: null,
         roundtable: null,
         single: null,
+        annotations: [],
+        followups: 0,
       };
       tasks.set(task.id, task);
       changed(task);
@@ -358,6 +386,50 @@ export function createTaskRegistry(deps: TaskRegistryDeps = {}): TaskRegistry {
 
     setError(id, error) {
       const task = requireTask(id);
+      task.error = error instanceof Error ? error.message : String(error);
+      changed(task);
+    },
+
+    setAnnotations(id, annotations) {
+      const task = requireTask(id);
+      task.annotations = annotations;
+      changed(task);
+    },
+
+    beginFollowup(id) {
+      const task = requireTask(id);
+      task.followups += 1;
+      task.status = 'running';
+      task.error = null;
+      changed(task);
+      return task.followups;
+    },
+
+    completeFollowup(id, lane, result) {
+      const task = requireTask(id);
+      if (result.outcome === 'success') {
+        // a successful follow-up speaks for the lane; an empty new diff keeps
+        // the old one (the notes may have been answered without changes)
+        const target =
+          task.mode === 'compete'
+            ? task.compete?.lanes.find((l) => l.lane === lane)
+            : task.mode === 'single'
+              ? task.single?.lane
+              : task.mode === 'cascade'
+                ? task.cascade?.winner
+                : undefined;
+        if (target) {
+          target.summary = result.summary;
+          if (result.diff.trim() !== '') target.diff = result.diff;
+        }
+      }
+      task.status = 'awaiting_pick';
+      changed(task);
+    },
+
+    failFollowup(id, error) {
+      const task = requireTask(id);
+      task.status = 'awaiting_pick';
       task.error = error instanceof Error ? error.message : String(error);
       changed(task);
     },

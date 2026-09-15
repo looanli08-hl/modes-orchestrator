@@ -540,6 +540,82 @@
   .diff-row.del { background: var(--del-bg); }
   .diff-row.del .line-content { color: var(--del-fg); }
   .diff-row.hunk .line-content { color: var(--accent); }
+
+  /* --- diff annotations: per-line notes sent back to the lane's agent ----- */
+  .diff-row .add-note, .diff-row .add-note-sp { width: 22px; flex: none; }
+  .add-note {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12px;
+    line-height: inherit;
+    padding: 0;
+    cursor: pointer;
+    opacity: 0;
+  }
+  .diff-row:hover .add-note, .diff-file-head:hover .add-note { opacity: 1; }
+  .add-note:hover { color: var(--accent); }
+  .diff-file-head .add-note { margin-left: auto; opacity: 0; }
+  .note-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin: 3px 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    background: var(--surface);
+    font-family: var(--mono);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .note-author { color: var(--accent); font-weight: 600; flex: none; }
+  .note-text { flex: 1; }
+  .note-del { border: 0; background: transparent; color: var(--muted); cursor: pointer; font: inherit; padding: 0 4px; flex: none; }
+  .note-del:hover { color: var(--danger); }
+  .note-editor { margin: 3px 8px; border: 1px solid var(--accent); border-radius: 6px; background: var(--surface); padding: 8px; }
+  .note-editor textarea {
+    width: 100%;
+    min-height: 56px;
+    border: 0;
+    background: transparent;
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    resize: vertical;
+  }
+  .note-editor textarea:focus { outline: none; }
+  .note-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 6px; }
+  .note-actions .hint { margin-right: auto; color: var(--muted); font-size: 11px; font-family: var(--mono); }
+  .note-actions button {
+    padding: 3px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .note-actions .note-save { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .notes-bar { display: flex; justify-content: flex-end; margin: 8px 12px 12px; }
+  .send-notes {
+    padding: 5px 14px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .send-notes:hover { filter: brightness(1.1); }
+  .send-notes:disabled { opacity: 0.5; cursor: default; }
   .diff-toggle {
     margin: 8px 0 0;
     padding: 4px 12px;
@@ -640,6 +716,10 @@ const apiUrl = {
   pick: (id) =>
     VIA_EXTENSION_PROXY ? `${API_BASE}/pick` : `${API_BASE}/tasks/${encodeURIComponent(id)}/pick`,
   worktrees: (id) => `${API_BASE}/tasks/${encodeURIComponent(id)}/worktrees`,
+  // annotations + followup: direct console routes only (no extension proxy
+  // equivalent — same precedent as the streams catch-up route)
+  followup: (id) => `${API_BASE}/tasks/${encodeURIComponent(id)}/followup`,
+  annotations: (id) => `${API_BASE}/tasks/${encodeURIComponent(id)}/annotations`,
   // catch-up read of a lane's raw output stream (byte-offset continuation);
   // not on the extension proxy — pulls there fail quietly and only SSE-less
   // polling remains, same as before streams existed
@@ -671,6 +751,8 @@ const state = {
   selectedClis: new Set(),
   // diff fold state survives re-renders: key = "<taskId>:<lane|winner>"
   expandedDiffs: new Set(),
+  // the open note editor: { lane, path, line } — one at a time, Orca-style
+  editingNote: null,
   // live lane output for the selected task: { taskId, lanes: Map<lane, entry> }
   // entry = { text, offset, follow, scrollTop, pulling, dirty }; null when no
   // task is selected. text survives re-renders, DOM nodes are repainted from it.
@@ -748,10 +830,32 @@ function groupDiffFiles(lines) {
   return files;
 }
 
-function renderDiffFile(file) {
+// --- diff annotations -------------------------------------------------------
+// Orca-style review notes, slimmed down: hover a diff line → "+" in the
+// gutter → an inline note editor pins {lane, path, line} + body. Notes live
+// on the task record (POST /annotations, whole-list writes) so a refresh
+// keeps them; "Send notes to agent" hands one lane's batch to the follow-up
+// endpoint — one batch = one run, never note-by-note.
+
+function noteRowHtml(note) {
+  return `<div class="note-row"><span class="note-text"><span class="note-author">you</span> ${esc(note.body)}</span>` +
+    `<button type="button" class="note-del" data-note-id="${esc(note.id)}" title="删除批注">×</button></div>`;
+}
+
+const NOTE_EDITOR_HTML = `<div class="note-row note-editing"><div class="note-editor">` +
+  `<textarea placeholder="给这行留条批注…"></textarea>` +
+  `<div class="note-actions"><span class="hint">⌘/Ctrl+Enter 保存 · Esc 取消</span>` +
+  `<button type="button" class="note-save">保存</button><button type="button" class="note-cancel">取消</button></div></div></div>`;
+
+function renderDiffFile(file, lane) {
   let adds = 0, dels = 0;
   let oldNo = null, newNo = null;
-  const rows = file.lines.map((line) => {
+  const notes = lane
+    ? (state.lastTask?.annotations ?? []).filter((a) => a.lane === lane && (a.path ?? null) === file.path)
+    : [];
+  const editing = state.editingNote;
+  let rows = "";
+  for (const line of file.lines) {
     const cls = diffLineClass(line);
     if (cls === "add") adds++;
     if (cls === "del") dels++;
@@ -764,26 +868,96 @@ function renderDiffFile(file) {
       else if (cls === "del") { gOld = oldNo++; }
       else { gOld = oldNo++; gNew = newNo++; }
     }
-    return `<span class="diff-row ${cls}"><span class="gut"><span>${gOld}</span><span>${gNew}</span></span>` +
-      `<span class="line-content">${esc(line) || " "}</span></span>`;
-  }).join("\n");
+    const lineNo = gNew !== "" ? gNew : gOld !== "" ? gOld : null;
+    const addBtn = lane && lineNo !== null
+      ? `<button type="button" class="add-note" data-lane="${esc(lane)}" data-path="${esc(file.path ?? "")}" data-line="${lineNo}" title="批注这行">+</button>`
+      : `<span class="add-note-sp"></span>`;
+    rows += `<span class="diff-row ${cls}">${addBtn}<span class="gut"><span>${gOld}</span><span>${gNew}</span></span>` +
+      `<span class="line-content">${esc(line) || " "}</span></span>\n`;
+    for (const n of notes.filter((x) => (x.line ?? 0) === lineNo)) rows += noteRowHtml(n) + "\n";
+    if (editing && editing.lane === lane && (editing.path ?? null) === file.path && editing.line === (lineNo ?? 0)) {
+      rows += NOTE_EDITOR_HTML + "\n";
+    }
+  }
   const counts = adds || dels
     ? `<span class="diff-count add">+${adds}</span><span class="diff-count del">−${dels}</span>` : "";
+  const fileNoteBtn = lane
+    ? `<button type="button" class="add-note" data-lane="${esc(lane)}" data-path="${esc(file.path ?? "")}" data-line="0" title="批注整个文件">+</button>`
+    : "";
+  const fileNotes = notes.filter((x) => (x.line ?? 0) === 0).map(noteRowHtml).join("");
+  const fileEditor = editing && editing.lane === lane && (editing.path ?? null) === file.path && editing.line === 0
+    ? NOTE_EDITOR_HTML : "";
   return `<div class="diff-file">
-    <div class="diff-file-head"><span class="diff-path">${esc(file.path || "changes")}</span>${counts}</div>
+    <div class="diff-file-head"><span class="diff-path">${esc(file.path || "changes")}</span>${counts}${fileNoteBtn}</div>
+    ${fileNotes}${fileEditor}
     <div class="diff-rows">${rows}</div>
   </div>`;
 }
 
-function renderDiff(diff, key) {
+function renderDiff(diff, key, lane) {
   const lines = diff.split("\n");
   const expanded = state.expandedDiffs.has(key);
   const folded = !expanded && lines.length > DIFF_FOLD_LINES;
   const shown = folded ? lines.slice(0, DIFF_FOLD_LINES) : lines;
-  const html = `<div class="diff">` + groupDiffFiles(shown).map(renderDiffFile).join("") + `</div>`;
+  const html = `<div class="diff">` + groupDiffFiles(shown).map((f) => renderDiffFile(f, lane)).join("") + `</div>`;
   if (lines.length <= DIFF_FOLD_LINES) return html;
   const label = expanded ? "show less" : `show more (${lines.length - DIFF_FOLD_LINES} more lines)`;
   return html + `<button class="diff-toggle" data-diff-key="${esc(key)}">${label}</button>`;
+}
+
+// the per-lane batch action, shown once that lane has notes
+function notesBar(task, lane) {
+  if (!lane || task.status === "running") return "";
+  const n = (task.annotations ?? []).filter((a) => a.lane === lane).length;
+  if (!n) return "";
+  return `<div class="notes-bar"><button type="button" class="send-notes" data-lane="${esc(lane)}">Send notes to agent (${n})</button></div>`;
+}
+
+async function saveAnnotations(next) {
+  const task = state.lastTask;
+  if (!task) return;
+  const updated = await api(apiUrl.annotations(task.id), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ annotations: next }),
+  });
+  renderDetail(updated);
+}
+
+function addNote(body) {
+  const ed = state.editingNote;
+  const task = state.lastTask;
+  if (!ed || !task) return;
+  const note = {
+    id: crypto.randomUUID(),
+    lane: ed.lane,
+    ...(ed.path ? { path: ed.path } : {}),
+    ...(ed.line ? { line: ed.line } : {}),
+    body,
+    createdAt: new Date().toISOString(),
+  };
+  state.editingNote = null;
+  saveAnnotations([...(task.annotations ?? []), note]).catch((err) => alert(`Save failed: ${err.message}`));
+}
+
+async function sendNotes(lane) {
+  const task = state.lastTask;
+  if (!task) return;
+  const notes = (task.annotations ?? [])
+    .filter((a) => a.lane === lane)
+    .map((a) => ({ ...(a.path ? { path: a.path } : {}), ...(a.line ? { line: a.line } : {}), body: a.body }));
+  if (!notes.length) return;
+  try {
+    await api(apiUrl.followup(task.id), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lane, notes }),
+    });
+    // the task is running again — reselect to follow the followup-N stream
+    await selectTask(task.id);
+  } catch (err) {
+    alert(`Follow-up failed: ${err.message}`);
+  }
 }
 
 function outcomeBadge(outcome) {
@@ -1154,6 +1328,7 @@ function startPolling() {
 
 async function selectTask(id) {
   state.selectedId = id;
+  state.editingNote = null;
   state.live = { taskId: id, lanes: new Map() };
   const task = await api(apiUrl.task(id));
   renderDetail(task);
@@ -1252,6 +1427,47 @@ function renderDetail(task) {
       if (state.lastTask) renderDetail(state.lastTask);
     });
   }
+
+  // --- annotation controls --------------------------------------------------
+  for (const el of detail.querySelectorAll(".add-note")) {
+    el.addEventListener("click", () => {
+      state.editingNote = {
+        lane: el.dataset.lane,
+        path: el.dataset.path || null,
+        line: Number(el.dataset.line ?? 0),
+      };
+      if (state.lastTask) renderDetail(state.lastTask);
+    });
+  }
+  for (const el of detail.querySelectorAll(".note-del")) {
+    el.addEventListener("click", () => {
+      const annotations = (state.lastTask?.annotations ?? []).filter((a) => a.id !== el.dataset.noteId);
+      saveAnnotations(annotations).catch((err) => alert(`Delete failed: ${err.message}`));
+    });
+  }
+  for (const el of detail.querySelectorAll(".send-notes")) {
+    el.addEventListener("click", () => sendNotes(el.dataset.lane));
+  }
+  const noteEditor = detail.querySelector(".note-editor textarea");
+  if (noteEditor) {
+    noteEditor.focus();
+    noteEditor.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        state.editingNote = null;
+        if (state.lastTask) renderDetail(state.lastTask);
+      } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (noteEditor.value.trim()) addNote(noteEditor.value.trim());
+      }
+    });
+    detail.querySelector(".note-save")?.addEventListener("click", () => {
+      if (noteEditor.value.trim()) addNote(noteEditor.value.trim());
+    });
+    detail.querySelector(".note-cancel")?.addEventListener("click", () => {
+      state.editingNote = null;
+      if (state.lastTask) renderDetail(state.lastTask);
+    });
+  }
 }
 
 function renderCompete(task) {
@@ -1270,7 +1486,7 @@ function renderCompete(task) {
       <div class="term-head"><span class="term-name">lane ${esc(String(l.lane).toLowerCase())}</span>${outcomeBadge(l.outcome)}</div>
       ${liveWrap(l.lane)}
       <div class="term-body">${esc(l.summary || "(no summary)")}</div>
-      ${l.diff ? renderDiff(l.diff, `${task.id}:lane-${l.lane}`) : `<div class="term-body muted-body">(no changes)</div>`}
+      ${l.diff ? renderDiff(l.diff, `${task.id}:lane-${l.lane}`, l.lane) + notesBar(task, l.lane) : `<div class="term-body muted-body">(no changes)</div>`}
     </div>`).join("") + `</div>`;
   if (task.status === "awaiting_pick") {
     const laneButtons = (task.lanes || [])
@@ -1300,7 +1516,7 @@ function renderCascade(task) {
     html += `<div class="lanes single"><div class="term">
       <div class="term-head"><span class="term-name">winner — L${esc(task.winner.level)} (${esc(task.winner.cli)})</span></div>
       <div class="term-body">${esc(task.winner.summary || "(no summary)")}</div>
-      ${task.winner.diff ? renderDiff(task.winner.diff, `${task.id}:winner`) : `<div class="term-body muted-body">(no changes)</div>`}
+      ${task.winner.diff ? renderDiff(task.winner.diff, `${task.id}:winner`, `cascade-${task.winner.level}`) + notesBar(task, `cascade-${task.winner.level}`) : `<div class="term-body muted-body">(no changes)</div>`}
     </div></div>`;
   } else {
     html += `<div class="banner"><span class="verdict">chain exhausted — no output</span>
@@ -1327,7 +1543,7 @@ function renderSingle(task) {
       <div class="term-head"><span class="term-name">${esc(l.cli)}</span>${outcomeBadge(l.outcome)}</div>
       ${liveWrap("single")}
       <div class="term-body">${esc(l.summary || "(no summary)")}</div>
-      ${l.diff ? renderDiff(l.diff, `${task.id}:single`) : `<div class="term-body muted-body">(no changes)</div>`}
+      ${l.diff ? renderDiff(l.diff, `${task.id}:single`, "single") + notesBar(task, "single") : `<div class="term-body muted-body">(no changes)</div>`}
     </div></div>`;
   if (task.status === "awaiting_pick") {
     html += `<div class="pick-bar">
