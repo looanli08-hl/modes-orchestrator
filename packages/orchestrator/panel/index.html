@@ -130,7 +130,7 @@
     position: sticky;
     top: 0;
   }
-  .brand { padding: 0 8px; display: flex; align-items: baseline; gap: 8px; }
+  .brand { padding: 0 8px; display: flex; align-items: center; gap: 7px; }
   .brand .wordmark { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
   .brand .tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
 
@@ -362,6 +362,8 @@
   /* empty state: consumer-grade entry — greeting, ask card, team pills */
   #stage-empty { display: flex; justify-content: center; padding: 12vh 32px 64px; }
   .empty-inner { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 20px; }
+  #brand-hero { margin: 0 auto -4px; }
+  #brand-mini { flex: none; }
   .empty-title {
     margin: 0 0 4px;
     text-align: center;
@@ -813,7 +815,7 @@
 <body>
 <div id="app">
   <aside>
-    <div class="brand"><span class="wordmark">modes</span><span class="tag">console</span></div>
+    <div class="brand"><svg id="brand-mini" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"></svg><span class="wordmark">modes</span><span class="tag">console</span></div>
     <button type="button" id="new-task-btn">+ New task</button>
     <div class="ws-section" id="ws-section">
       <div class="tl-group-head ws-head">Workspaces <button type="button" id="new-ws-btn" title="新建工作区">+ New</button></div>
@@ -831,6 +833,7 @@
   <main>
     <section id="stage-empty">
       <div class="empty-inner">
+        <svg id="brand-hero" width="96" height="96" viewBox="0 0 24 24" aria-hidden="true"></svg>
         <h1 class="empty-title">今天让团队做点什么？</h1>
         <div class="roster">
           <span class="roster-label" id="roster-label">团队：自动搭配</span>
@@ -2234,6 +2237,112 @@ setMode("auto");
 loadClis();
 refreshTaskList();
 refreshWorkspaceList();
+
+// ── modes brand mark (v3: luminance tide on a Gerstner-ish envelope) ──
+// Depth reads as light on water viewed from above: crest bright, trough dim.
+// Coprime periods (5s wave / 11s modulation / 23s drift) — never repeats.
+const BRAND_BARS = 13;
+const BRAND_CFG = { core: 3.1, gap: 6.1, base: 1.9, amp: 2.1, width: 1.7 };
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function brandEnvelope(s) {
+  const n = 0.5 + 0.5 * s;
+  return 0.62 * n + 0.38 * Math.pow(n, 2.6); // peaked crest, wide trough
+}
+
+function brandPalette() {
+  const cs = getComputedStyle(document.body);
+  const hexToRgb = (v) => {
+    const m = v.trim().replace("#", "");
+    return [0, 2, 4].map((i) => parseInt(m.slice(i, i + 2), 16));
+  };
+  const ink = hexToRgb(cs.getPropertyValue("--accent") ? cs.getPropertyValue("--fg") : "#e6edf3");
+  const bg = hexToRgb(cs.getPropertyValue("--bg") || "#0d1117");
+  const lightBg = (bg[0] * 299 + bg[1] * 587 + bg[2] * 114) / 1000 > 128;
+  // brand teal is fixed (not the theme accent): light on dark bg, deep on light bg
+  const accent = lightBg ? [61, 122, 103] : [124, 193, 175];
+  return { ink, accent };
+}
+
+function buildBrandMark(svg, accentCss) {
+  const uid = `bb${Math.random().toString(36).slice(2, 8)}`;
+  const defs = document.createElementNS(SVG_NS, "defs");
+  defs.innerHTML = `<filter id="${uid}" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="1.6"/></filter>`;
+  svg.appendChild(defs);
+  const g = document.createElementNS(SVG_NS, "g");
+  svg.appendChild(g);
+  const glow = document.createElementNS(SVG_NS, "circle");
+  glow.setAttribute("cx", 12); glow.setAttribute("cy", 12);
+  glow.setAttribute("r", BRAND_CFG.core + 1.1);
+  glow.setAttribute("fill", accentCss);
+  glow.setAttribute("filter", `url(#${uid})`);
+  g.appendChild(glow);
+  const bars = [];
+  for (let i = 0; i < BRAND_BARS; i++) {
+    const line = document.createElementNS(SVG_NS, "line");
+    line.setAttribute("stroke-linecap", "round");
+    line.setAttribute("stroke-width", BRAND_CFG.width);
+    g.appendChild(line);
+    bars.push(line);
+  }
+  const core = document.createElementNS(SVG_NS, "circle");
+  core.setAttribute("cx", 12); core.setAttribute("cy", 12);
+  core.setAttribute("r", BRAND_CFG.core * 1.04); // optical overshoot
+  core.setAttribute("fill", accentCss);
+  g.appendChild(core);
+  return { bars, glow };
+}
+
+function brandFrame(mark, t, pal, energy) {
+  const w1 = (2 * Math.PI * t) / (energy === "lively" ? 3400 : 5000);
+  const w2 = (2 * Math.PI * t) / 11000;
+  const drift = (2 * Math.PI * t) / 23000;
+  for (let i = 0; i < BRAND_BARS; i++) {
+    const phi = (2 * Math.PI * i) / BRAND_BARS - Math.PI / 2;
+    const env = brandEnvelope(Math.sin(phi + Math.PI / 2));
+    const wave = 0.5 + 0.5 * Math.sin(phi + w1 + drift);
+    const b = Math.max(0, Math.min(1, 0.15 + env * 0.25 + wave * (0.35 + 0.45 * env) * 0.8));
+    const lenMod = energy === "lively" ? 0.22 : 0.12;
+    const len = (BRAND_CFG.base + BRAND_CFG.amp * env) * (1 + lenMod * Math.sin(phi + w1 + w2));
+    const r0 = BRAND_CFG.gap;
+    const r1 = BRAND_CFG.gap + len * (env > 0.9 ? 0.98 : 1);
+    const line = mark.bars[i];
+    line.setAttribute("x1", 12 + r0 * Math.cos(phi));
+    line.setAttribute("y1", 12 + r0 * Math.sin(phi));
+    line.setAttribute("x2", 12 + r1 * Math.cos(phi));
+    line.setAttribute("y2", 12 + r1 * Math.sin(phi));
+    const k = Math.pow(b, 2.2) * 0.85;
+    const dim = 0.3 + 0.7 * b;
+    const c = pal.ink.map((v, j) => Math.round(v * dim + (pal.accent[j] - v) * k));
+    line.setAttribute("stroke", `rgb(${c[0]},${c[1]},${c[2]})`);
+  }
+  // asymmetric glow breath: 4s inhale, 6s exhale
+  const cyc = t % 10000;
+  const kk = cyc < 4000 ? cyc / 4000 : 1 - (cyc - 4000) / 6000;
+  const e = 0.5 - 0.5 * Math.cos(Math.PI * kk);
+  mark.glow.setAttribute("opacity", String(0.15 + 0.24 * e));
+  mark.glow.setAttribute("r", String(BRAND_CFG.core + 0.7 + 0.9 * e));
+}
+
+(function initBrandMarks() {
+  const pal = brandPalette();
+  const accentCss = `rgb(${pal.accent[0]},${pal.accent[1]},${pal.accent[2]})`;
+  const heroSvg = document.getElementById("brand-hero");
+  const miniSvg = document.getElementById("brand-mini");
+  const marks = [];
+  if (heroSvg) marks.push({ mark: buildBrandMark(heroSvg, accentCss), energy: "calm" });
+  if (miniSvg) {
+    const mini = buildBrandMark(miniSvg, accentCss);
+    mini.glow.setAttribute("opacity", "0");
+    brandFrame(mini, 1250, pal, "calm"); // frozen brand frame in the rail
+  }
+  if (!marks.length) return;
+  const loop = (t) => {
+    for (const m of marks) brandFrame(m.mark, t, pal, m.energy);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+})();
 </script>
 </body>
 </html>
