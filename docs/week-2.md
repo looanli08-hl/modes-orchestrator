@@ -255,3 +255,10 @@ bun run dev
 - [x] **工作区面板**：左栏 Workspaces 区块（栏内创建表单）+ 工作区视图（Changes 折叠 diff + 会话时间线 run-1/run-2… + 底部 sticky 输入框反复派活 + running 禁用态）；直播逻辑 ctx 参数化，任务/工作区共用
 - [x] 真实冒烟：clever-manatee 工作区两轮 prompt 同一 session resume、Changes diff 正确
 - 测试 419 → 446 全绿
+
+## Day 5 — 品牌：modes logo 定稿并落地（v3 放射浪明度潮水）
+
+- [x] **设计过程**（用户主导，多轮迭代）：SVG 参数化草案 → kimi.com 生图试水（发现其生图/设计 agent 均为代码驱动，非自由图像模型，放弃）→ GitHub 设计方法调研（Gerstner 尖峰圆谷、明度表达纵深、光学校正、互质周期防机械感）→ 极简方向（潮位圆等四款，用户否）→ 回到 v3 定稿
+- [x] **定稿**：13 圆角柱 + 中心圆 + 环形缺口，明度潮水（峰亮谷暗俯瞰海面），互质周期（5s/11s/23s）永不重复，4s 吸/6s 呼不对称柔光；品牌青碧固定（#7cc1af 深底 / #3d7a67 浅底），不随 UI accent
+- [x] **落地**：面板空状态 hero 活 logo + 左栏字标静态帧；品牌资产 `brand/`（双底 SVG + 生成脚本 brand-generate.ts + 规范 README）
+- 备注：放射构图的撞脸风险（Claude 星芒/加载菊花）调研时已如实告知用户，用户拍板仍选 v3——明度纵深 + 尖峰圆谷是其与普通放射的区分点
